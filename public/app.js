@@ -177,12 +177,12 @@ function renderGuestCard(guest, type, nodeName) {
   `;
 }
 
-function renderStorageCard(storage) {
+function renderStorageCard(storage, nodeName) {
   const usedPct = pct(storage.used, storage.total);
   const available = (storage.total || 0) - (storage.used || 0);
 
   return `
-    <div class="storage-card">
+    <div class="storage-card" data-node="${nodeName}" data-storage="${storage.storage}" onclick="openStorageDetail(this)">
       <div class="storage-card-header">
         <span class="storage-name">${storage.storage}</span>
         <span class="storage-type">${storage.type || '—'}</span>
@@ -259,7 +259,7 @@ function render(data) {
         html += `<div class="section-title">Storage <span class="count">${activeStorages.length}</span></div>`;
         html += `<div class="storage-grid">`;
         for (const s of activeStorages) {
-          html += renderStorageCard(s);
+          html += renderStorageCard(s, node.name);
         }
         html += `</div>`;
       }
@@ -441,6 +441,142 @@ function renderMiniChart(rrdData, key, label, transform, suffix, isBytes) {
       <polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
     </svg>
   </div>`;
+}
+
+// Storage detail panel
+function openStorageDetail(el) {
+  const node = el.dataset.node;
+  const storage = el.dataset.storage;
+
+  document.getElementById('detail-title').textContent = `Storage: ${storage}`;
+  document.getElementById('detail-body').innerHTML = '<div class="detail-loading">Loading...</div>';
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+
+  fetch(`/api/storage/${node}/${storage}`)
+    .then(r => r.json())
+    .then(data => renderStorageDetail(data, storage))
+    .catch(err => {
+      document.getElementById('detail-body').innerHTML = `<div class="detail-loading">Error: ${err.message}</div>`;
+    });
+}
+
+function renderStorageDetail(data, storageName) {
+  const body = document.getElementById('detail-body');
+  const { status, content, dependents, rrdHour } = data;
+  let html = '';
+
+  // Overall status
+  const usedPct = pct(status.used, status.total);
+  const available = (status.total || 0) - (status.used || 0);
+
+  html += `<div class="detail-section">
+    <h3>Overview</h3>
+    <div class="detail-grid">
+      <div class="detail-item">
+        <div class="label">Type</div>
+        <div class="value">${status.type || '—'}</div>
+      </div>
+      <div class="detail-item">
+        <div class="label">Status</div>
+        <div class="value"><span class="guest-status ${status.active ? 'running' : 'stopped'}">${status.active ? 'Active' : 'Inactive'}</span></div>
+      </div>
+      <div class="detail-item">
+        <div class="label">Used</div>
+        <div class="value">${formatBytes(status.used)} (${usedPct}%)</div>
+        ${progressBar(usedPct)}
+      </div>
+      <div class="detail-item">
+        <div class="label">Available</div>
+        <div class="value">${formatBytes(available)}</div>
+      </div>
+      <div class="detail-item full">
+        <div class="label">Total Capacity</div>
+        <div class="value">${formatBytes(status.total)}</div>
+      </div>
+    </div>
+  </div>`;
+
+  // Content breakdown
+  if (content && content.length > 0) {
+    const sorted = [...content].sort((a, b) => (b.size || 0) - (a.size || 0));
+    const maxSize = sorted[0]?.size || 1;
+
+    const byType = {};
+    for (const item of sorted) {
+      const ct = item.content || 'unknown';
+      if (!byType[ct]) byType[ct] = { count: 0, size: 0 };
+      byType[ct].count++;
+      byType[ct].size += item.size || 0;
+    }
+
+    html += `<div class="detail-section">
+      <h3>Space by Type</h3>
+      <div class="detail-grid">`;
+    for (const [type, info] of Object.entries(byType).sort((a, b) => b[1].size - a[1].size)) {
+      html += `<div class="detail-item">
+        <div class="label">${type} (${info.count})</div>
+        <div class="value">${formatBytes(info.size)}</div>
+      </div>`;
+    }
+    html += `</div></div>`;
+
+    html += `<div class="detail-section">
+      <h3>Contents (${sorted.length} items)</h3>
+      <div style="overflow-x:auto;">
+      <table class="content-table">
+        <thead><tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Size</th>
+          <th style="width:120px"></th>
+        </tr></thead>
+        <tbody>`;
+
+    for (const item of sorted.slice(0, 50)) {
+      const name = (item.volid || '').replace(`${storageName}:`, '');
+      const barWidth = Math.max(2, ((item.size || 0) / maxSize) * 100);
+      html += `<tr>
+        <td>${name}</td>
+        <td>${item.content || '—'}</td>
+        <td>${formatBytes(item.size)}</td>
+        <td><div class="size-bar"><div class="size-bar-fill" style="width:${barWidth}%;height:6px;border-radius:3px;background:var(--accent);min-width:2px"></div></div></td>
+      </tr>`;
+    }
+    if (sorted.length > 50) {
+      html += `<tr><td colspan="4" style="color:var(--text-dim);text-align:center">...and ${sorted.length - 50} more items</td></tr>`;
+    }
+
+    html += `</tbody></table></div></div>`;
+  }
+
+  // Dependents
+  if (dependents && dependents.length > 0) {
+    html += `<div class="detail-section">
+      <h3>Dependent Guests (${dependents.length})</h3>
+      <div class="dependents-list">`;
+    for (const dep of dependents) {
+      const typeLabel = dep.type === 'qemu' ? 'VM' : 'LXC';
+      html += `<div class="dependent-card">
+        <div>
+          <div class="dep-name">${dep.name || `${typeLabel} ${dep.vmid}`}</div>
+          <div class="dep-id">${typeLabel} ${dep.vmid}</div>
+        </div>
+        <span class="guest-status ${dep.status}">${dep.status}</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  // Historical chart
+  if (rrdHour && rrdHour.length > 0) {
+    html += `<div class="detail-section">
+      <h3>Last 24 Hours</h3>
+      ${renderMiniChart(rrdHour, 'used', 'Space Used', v => v || 0, '', true)}
+    </div>`;
+  }
+
+  body.innerHTML = html;
 }
 
 // Init

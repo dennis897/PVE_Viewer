@@ -117,6 +117,55 @@ app.get('/api/guest/:node/:type/:vmid', async (req, res) => {
   }
 });
 
+app.get('/api/storage/:node/:storage', async (req, res) => {
+  try {
+    const { node, storage } = req.params;
+    const host = getHosts()[0];
+
+    const [status, content, vms, lxcs, rrdHour] = await Promise.all([
+      pveApi(host, `/nodes/${node}/storage/${storage}/status`),
+      pveApi(host, `/nodes/${node}/storage/${storage}/content`).catch(() => []),
+      pveApi(host, `/nodes/${node}/qemu`),
+      pveApi(host, `/nodes/${node}/lxc`),
+      pveApi(host, `/nodes/${node}/storage/${storage}/rrddata?timeframe=day`).catch(() => [])
+    ]);
+
+    const vmConfigs = await Promise.all(
+      vms.map(vm =>
+        pveApi(host, `/nodes/${node}/qemu/${vm.vmid}/config`)
+          .then(cfg => ({ vmid: vm.vmid, name: vm.name, status: vm.status, type: 'qemu', config: cfg }))
+          .catch(() => null)
+      )
+    );
+
+    const lxcConfigs = await Promise.all(
+      lxcs.map(ct =>
+        pveApi(host, `/nodes/${node}/lxc/${ct.vmid}/config`)
+          .then(cfg => ({ vmid: ct.vmid, name: ct.name, status: ct.status, type: 'lxc', config: cfg }))
+          .catch(() => null)
+      )
+    );
+
+    const allGuests = [...vmConfigs, ...lxcConfigs].filter(Boolean);
+    const dependents = [];
+    for (const guest of allGuests) {
+      const cfg = guest.config;
+      const usesStorage = Object.entries(cfg).some(([key, val]) => {
+        if (typeof val !== 'string') return false;
+        return val.startsWith(`${storage}:`) || val.includes(`${storage}:`);
+      });
+      if (usesStorage) {
+        dependents.push({ vmid: guest.vmid, name: guest.name, status: guest.status, type: guest.type });
+      }
+    }
+
+    res.json({ status, content, dependents, rrdHour });
+  } catch (err) {
+    console.error('Storage detail error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Proxmox View running at http://localhost:${PORT}`);
   console.log(`Monitoring: ${getHosts().join(', ')}`);
