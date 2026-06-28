@@ -500,11 +500,170 @@ function render(data) {
     }
   }
 
+  if (data.pbs) {
+    html += renderPbsSection(data.pbs);
+  }
+
   if (!html) {
     html = `<div class="empty-state"><h3>No data</h3><p>Check your Proxmox connection settings.</p></div>`;
   }
 
   dashboard.innerHTML = html;
+}
+
+// PBS Section
+function renderPbsSection(pbs) {
+  let html = `<div class="node-section pbs-section">`;
+
+  html += `<div class="node-header">
+    <h2>
+      <span class="pbs-icon">🛡</span>
+      Proxmox Backup Server
+    </h2>
+    <span class="node-status-badge online">online</span>`;
+
+  if (pbs.nodeStatus) {
+    html += `<span class="uptime">Uptime: ${formatUptime(pbs.nodeStatus.uptime)}</span>`;
+  }
+  html += `</div>`;
+
+  if (pbs.nodeStatus) {
+    const cpuPct = Math.round((pbs.nodeStatus.cpu || 0) * 100);
+    const memPct = pct(pbs.nodeStatus.mem, pbs.nodeStatus.maxmem);
+
+    html += `<div class="overview-grid">
+      <div class="overview-card">
+        <div class="label">CPU</div>
+        <div class="value">${cpuPct}%</div>
+        <div class="sub">${pbs.nodeStatus.cpuCount} cores</div>
+        ${progressBar(cpuPct)}
+      </div>
+      <div class="overview-card">
+        <div class="label">Memory</div>
+        <div class="value">${memPct}%</div>
+        <div class="sub">${formatBytes(pbs.nodeStatus.mem)} / ${formatBytes(pbs.nodeStatus.maxmem)}</div>
+        ${progressBar(memPct)}
+      </div>`;
+
+    if (pbs.datastores.length > 0) {
+      const ds = pbs.datastores[0];
+      const totalSnaps = pbs.datastores.reduce((sum, d) => sum + d.totalSnapshots, 0);
+      html += `<div class="overview-card">
+        <div class="label">Snapshots</div>
+        <div class="value">${totalSnaps}</div>
+        <div class="sub">${pbs.datastores.length} datastore${pbs.datastores.length > 1 ? 's' : ''}</div>
+      </div>`;
+    }
+
+    const recentOk = pbs.recentTasks.filter(t => t.status === 'OK').length;
+    const recentFail = pbs.recentTasks.filter(t => t.status && t.status !== 'OK').length;
+    html += `<div class="overview-card">
+      <div class="label">Recent Backups</div>
+      <div class="value">${recentOk} <span style="font-size:14px;color:var(--green)">OK</span>${recentFail > 0 ? ` <span style="font-size:14px;color:var(--red)">${recentFail} failed</span>` : ''}</div>
+      <div class="sub">last ${pbs.recentTasks.length} tasks</div>
+    </div>`;
+
+    html += `</div>`;
+  }
+
+  // Datastores
+  for (const ds of pbs.datastores) {
+    const used = ds.status?.used || 0;
+    const total = ds.status?.total || 0;
+    const avail = ds.status?.avail || (total - used);
+    const usedPct = pct(used, total);
+
+    html += `<div class="section-title">Datastore: ${ds.store} <span class="count">${ds.totalSnapshots} snapshots</span></div>`;
+    html += `<div class="pbs-datastore-card">
+      <div class="pbs-ds-usage">
+        <div class="pbs-ds-usage-header">
+          <span>${formatBytes(used)} used of ${formatBytes(total)}</span>
+          <span>${formatBytes(avail)} free</span>
+        </div>
+        ${progressBar(usedPct)}
+      </div>
+    </div>`;
+
+    // Guest backup table
+    if (ds.guestBackups.length > 0) {
+      html += `<div class="pbs-backup-grid">`;
+      for (const gb of ds.guestBackups) {
+        const typeLabel = gb.type === 'vm' ? 'VM' : gb.type === 'ct' ? 'LXC' : gb.type.toUpperCase();
+        const lastDate = new Date(gb.lastBackup * 1000);
+        const ago = formatTimeAgo(gb.lastBackup);
+        const iconClass = gb.type === 'vm' ? 'vm' : 'lxc';
+
+        html += `<div class="pbs-backup-card">
+          <div class="pbs-backup-header">
+            <span class="pbs-backup-name">
+              <span class="guest-icon mini ${iconClass}">${gb.type === 'vm' ? '⊞' : '⊡'}</span>
+              ${typeLabel} ${gb.id}
+            </span>
+            <span class="pbs-backup-count">${gb.count} backup${gb.count !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="pbs-backup-detail">
+            <span>Last: ${ago}</span>
+            <span>${formatBytes(gb.size)}</span>
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+  }
+
+  // Recent tasks
+  if (pbs.recentTasks.length > 0) {
+    html += `<div class="section-title" style="cursor:pointer" onclick="togglePbsTasks(this)">
+      Recent Backup Tasks <span class="count">${pbs.recentTasks.length}</span>
+      <span class="rec-toggle">▸</span>
+    </div>`;
+    html += `<div class="pbs-tasks-list" style="display:none">`;
+    for (const task of pbs.recentTasks) {
+      const isOk = task.status === 'OK';
+      const statusClass = isOk ? 'running' : 'stopped';
+      const statusText = isOk ? 'OK' : (task.status || 'unknown');
+      const time = task.startTime ? new Date(task.startTime * 1000).toLocaleString() : '—';
+      const dur = task.duration ? formatDuration(task.duration) : '—';
+
+      html += `<div class="pbs-task-row">
+        <span class="guest-status ${statusClass}" style="min-width:50px;text-align:center">${statusText}</span>
+        <span class="pbs-task-id">${task.id || '—'}</span>
+        <span class="pbs-task-time">${time}</span>
+        <span class="pbs-task-dur">${dur}</span>
+      </div>`;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+function formatTimeAgo(epochSecs) {
+  const now = Math.floor(Date.now() / 1000);
+  const diff = now - epochSecs;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  return new Date(epochSecs * 1000).toLocaleDateString();
+}
+
+function formatDuration(secs) {
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m ${secs % 60}s`;
+  return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
+function togglePbsTasks(el) {
+  const list = el.nextElementSibling;
+  const toggle = el.querySelector('.rec-toggle');
+  if (list.style.display === 'none') {
+    list.style.display = '';
+    toggle.textContent = '▾';
+  } else {
+    list.style.display = 'none';
+    toggle.textContent = '▸';
+  }
 }
 
 // Detail panel

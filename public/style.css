@@ -892,6 +892,109 @@ header {
   color: var(--text-dim);
 }
 
+/* PBS Section */
+.pbs-section {
+  border-top: 2px solid var(--border);
+  padding-top: 24px;
+  margin-top: 40px;
+}
+
+.pbs-icon {
+  font-size: 20px;
+  margin-right: 2px;
+}
+
+.pbs-datastore-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 14px;
+}
+
+.pbs-ds-usage-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+
+.pbs-backup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.pbs-backup-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.pbs-backup-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.pbs-backup-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.pbs-backup-count {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.pbs-backup-detail {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.pbs-tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pbs-task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.pbs-task-id {
+  font-weight: 500;
+  flex: 1;
+}
+
+.pbs-task-time {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.pbs-task-dur {
+  color: var(--text-dim);
+  font-size: 12px;
+  min-width: 60px;
+  text-align: right;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   header {

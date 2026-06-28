@@ -17,6 +17,97 @@ function getHosts() {
   return [process.env.PROXMOX_HOST];
 }
 
+const PBS_HOST = process.env.PBS_HOST;
+const PBS_TOKEN_ID = process.env.PBS_TOKEN_ID;
+const PBS_TOKEN_SECRET = process.env.PBS_TOKEN_SECRET;
+const pbsEnabled = !!(PBS_HOST && PBS_TOKEN_ID && PBS_TOKEN_SECRET);
+
+async function pbsApi(endpoint) {
+  const url = `${PBS_HOST}/api2/json${endpoint}`;
+  const res = await fetch(url, {
+    headers: {
+      'Authorization': `PBSAPIToken=${PBS_TOKEN_ID}:${PBS_TOKEN_SECRET}`
+    },
+    agent: httpsAgent
+  });
+  if (!res.ok) {
+    throw new Error(`PBS API error: ${res.status} ${res.statusText} for ${endpoint}`);
+  }
+  const json = await res.json();
+  return json.data;
+}
+
+async function fetchPbsData() {
+  if (!pbsEnabled) return null;
+
+  const [datastores, nodeStatus, tasks] = await Promise.all([
+    pbsApi('/admin/datastore').catch(() => []),
+    pbsApi('/nodes/localhost/status').catch(() => null),
+    pbsApi('/nodes/localhost/tasks?limit=50&typefilter=backup').catch(() => [])
+  ]);
+
+  const datastoreDetails = await Promise.all(
+    datastores.map(async (ds) => {
+      const [status, snapshots] = await Promise.all([
+        pbsApi(`/admin/datastore/${ds.store}/status`).catch(() => null),
+        pbsApi(`/admin/datastore/${ds.store}/snapshots`).catch(() => [])
+      ]);
+
+      const guestBackups = {};
+      for (const snap of snapshots) {
+        const id = snap['backup-id'];
+        const type = snap['backup-type'];
+        const time = snap['backup-time'];
+        const size = snap.size || 0;
+        const key = `${type}/${id}`;
+
+        if (!guestBackups[key] || time > guestBackups[key].lastBackup) {
+          guestBackups[key] = {
+            id,
+            type,
+            lastBackup: time,
+            size,
+            count: (guestBackups[key]?.count || 0) + 1
+          };
+        } else {
+          guestBackups[key].count++;
+        }
+      }
+
+      return {
+        store: ds.store,
+        comment: ds.comment,
+        status,
+        totalSnapshots: snapshots.length,
+        guestBackups: Object.values(guestBackups).sort((a, b) => b.lastBackup - a.lastBackup)
+      };
+    })
+  );
+
+  const recentTasks = tasks.map(t => ({
+    upid: t.upid,
+    type: t.worker_type,
+    id: t.worker_id,
+    status: t.status,
+    startTime: t.starttime,
+    endTime: t.endtime,
+    duration: t.endtime && t.starttime ? t.endtime - t.starttime : null
+  }));
+
+  return {
+    host: PBS_HOST,
+    nodeStatus: nodeStatus ? {
+      uptime: nodeStatus.uptime,
+      cpu: nodeStatus.cpu,
+      cpuCount: nodeStatus.cpuinfo?.cpus || 0,
+      mem: nodeStatus.memory?.used || 0,
+      maxmem: nodeStatus.memory?.total || 0
+    } : null,
+    datastores: datastoreDetails,
+    recentTasks
+  };
+}
+
 async function pveApi(host, endpoint) {
   const url = `${host}/api2/json${endpoint}`;
   const res = await fetch(url, {
@@ -93,9 +184,13 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/data', async (req, res) => {
   try {
     const hosts = getHosts();
-    const results = await Promise.all(hosts.map(fetchHostData));
+    const [results, pbsData] = await Promise.all([
+      Promise.all(hosts.map(fetchHostData)),
+      fetchPbsData().catch(err => { console.error('PBS fetch error:', err.message); return null; })
+    ]);
     res.json({
       hosts: results,
+      pbs: pbsData,
       refreshInterval: REFRESH_INTERVAL,
       timestamp: new Date().toISOString()
     });
@@ -243,5 +338,6 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Proxmox View running at http://localhost:${PORT}`);
   console.log(`Monitoring: ${getHosts().join(', ')}`);
+  if (pbsEnabled) console.log(`PBS: ${PBS_HOST}`);
   console.log(`Refresh interval: ${REFRESH_INTERVAL}ms`);
 });
