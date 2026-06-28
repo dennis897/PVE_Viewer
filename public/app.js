@@ -117,6 +117,8 @@ function renderGuestCard(guest, type, nodeName) {
   const cpuPct = isRunning ? Math.round((guest.cpu || 0) * 100) : 0;
   const memPct = isRunning ? pct(guest.mem, guest.maxmem) : 0;
   const diskPct = pct(guest.disk, guest.maxdisk);
+  const swapPct = pct(guest.swap, guest.maxswap);
+  const hasSwap = guest.maxswap && guest.maxswap > 0;
   const netIn = guest.netin || 0;
   const netOut = guest.netout || 0;
   const apiType = type === 'vm' ? 'qemu' : 'lxc';
@@ -158,11 +160,20 @@ function renderGuestCard(guest, type, nodeName) {
           </div>
           <div class="metric">
             <div class="metric-header">
+              <span class="metric-label">${hasSwap ? 'Swap' : 'Network'}</span>
+              <span class="metric-value">${hasSwap ? `${formatBytes(guest.swap)} / ${formatBytes(guest.maxswap)}` : `↓${formatBytes(netIn)} ↑${formatBytes(netOut)}`}</span>
+            </div>
+            ${hasSwap ? progressBar(swapPct) : ''}
+          </div>
+        </div>
+        ${hasSwap ? `
+          <div style="margin-top:8px">
+            <div class="metric-header" style="font-size:12px">
               <span class="metric-label">Network</span>
               <span class="metric-value">↓${formatBytes(netIn)} ↑${formatBytes(netOut)}</span>
             </div>
           </div>
-        </div>
+        ` : ''}
       ` : `
         <div class="guest-metrics">
           <div class="metric" style="grid-column: span 2">
@@ -197,6 +208,130 @@ function renderStorageCard(storage, nodeName) {
   `;
 }
 
+function generateRecommendations(node) {
+  const recs = [];
+  const allGuests = [
+    ...node.vms.map(v => ({ ...v, gtype: 'VM' })),
+    ...node.lxcs.map(c => ({ ...c, gtype: 'LXC' }))
+  ].filter(g => g.status === 'running');
+
+  // Node-level checks
+  const nodeCpuPct = Math.round((node.cpu || 0) * 100);
+  const nodeMemPct = pct(node.mem, node.maxmem);
+
+  if (nodeCpuPct >= 90) {
+    recs.push({ severity: 'critical', icon: '!!', message: `Node CPU at ${nodeCpuPct}% — consider migrating workloads to another node or adding CPU resources` });
+  } else if (nodeCpuPct >= 75) {
+    recs.push({ severity: 'warning', icon: '!', message: `Node CPU at ${nodeCpuPct}% — monitor for sustained high usage, consider load balancing` });
+  }
+
+  if (nodeMemPct >= 90) {
+    recs.push({ severity: 'critical', icon: '!!', message: `Node memory at ${nodeMemPct}% (${formatBytes(node.mem)} / ${formatBytes(node.maxmem)}) — risk of OOM, consider adding RAM or migrating guests` });
+  } else if (nodeMemPct >= 80) {
+    recs.push({ severity: 'warning', icon: '!', message: `Node memory at ${nodeMemPct}% — approaching capacity, plan for expansion` });
+  }
+
+  // Guest-level checks
+  for (const guest of allGuests) {
+    const name = guest.name || `${guest.gtype} ${guest.vmid}`;
+
+    // Disk usage
+    if (guest.maxdisk > 0 && guest.disk > 0) {
+      const diskPctVal = pct(guest.disk, guest.maxdisk);
+      if (diskPctVal >= 95) {
+        recs.push({ severity: 'critical', icon: '!!', message: `${name} disk at ${diskPctVal}% — resize disk immediately to prevent data loss` });
+      } else if (diskPctVal >= 85) {
+        recs.push({ severity: 'warning', icon: '!', message: `${name} disk at ${diskPctVal}% (${formatBytes(guest.disk)} / ${formatBytes(guest.maxdisk)}) — consider resizing disk soon` });
+      } else if (diskPctVal >= 75) {
+        recs.push({ severity: 'info', icon: 'i', message: `${name} disk at ${diskPctVal}% — monitor disk growth, plan for resize` });
+      }
+    }
+
+    // Memory usage
+    const memPctVal = pct(guest.mem, guest.maxmem);
+    if (memPctVal >= 95) {
+      recs.push({ severity: 'critical', icon: '!!', message: `${name} memory at ${memPctVal}% — increase memory allocation to prevent OOM kills` });
+    } else if (memPctVal >= 85) {
+      recs.push({ severity: 'warning', icon: '!', message: `${name} memory at ${memPctVal}% (${formatBytes(guest.mem)} / ${formatBytes(guest.maxmem)}) — consider increasing memory` });
+    }
+
+    // Swap usage (LXCs primarily)
+    if (guest.maxswap > 0 && guest.swap > 0) {
+      const swapPctVal = pct(guest.swap, guest.maxswap);
+      if (swapPctVal >= 80) {
+        recs.push({ severity: 'warning', icon: '!', message: `${name} swap at ${swapPctVal}% (${formatBytes(guest.swap)} / ${formatBytes(guest.maxswap)}) — high swap indicates memory pressure, consider increasing RAM` });
+      } else if (swapPctVal >= 50) {
+        recs.push({ severity: 'info', icon: 'i', message: `${name} using ${swapPctVal}% swap — moderate swap usage may impact performance, consider more memory` });
+      }
+    }
+
+    // CPU usage
+    const cpuPctVal = Math.round((guest.cpu || 0) * 100);
+    if (cpuPctVal >= 90) {
+      recs.push({ severity: 'warning', icon: '!', message: `${name} CPU at ${cpuPctVal}% — consider adding more vCPU cores` });
+    }
+  }
+
+  // Storage pool checks
+  for (const stor of node.storages.filter(s => s.active && s.total > 0)) {
+    const storPct = pct(stor.used, stor.total);
+    if (storPct >= 95) {
+      recs.push({ severity: 'critical', icon: '!!', message: `Storage "${stor.storage}" at ${storPct}% — critical, expand storage or clean up immediately` });
+    } else if (storPct >= 85) {
+      recs.push({ severity: 'warning', icon: '!', message: `Storage "${stor.storage}" at ${storPct}% (${formatBytes(stor.used)} / ${formatBytes(stor.total)}) — consider expanding or cleaning old backups/snapshots` });
+    } else if (storPct >= 75) {
+      recs.push({ severity: 'info', icon: 'i', message: `Storage "${stor.storage}" at ${storPct}% — monitor usage and plan for expansion` });
+    }
+  }
+
+  // Sort by severity
+  const order = { critical: 0, warning: 1, info: 2 };
+  recs.sort((a, b) => order[a.severity] - order[b.severity]);
+
+  return recs;
+}
+
+function renderRecommendations(recs) {
+  const critCount = recs.filter(r => r.severity === 'critical').length;
+  const warnCount = recs.filter(r => r.severity === 'warning').length;
+  const infoCount = recs.filter(r => r.severity === 'info').length;
+
+  let summary = [];
+  if (critCount > 0) summary.push(`${critCount} critical`);
+  if (warnCount > 0) summary.push(`${warnCount} warning`);
+  if (infoCount > 0) summary.push(`${infoCount} info`);
+
+  let html = `<div class="recommendations-section">
+    <div class="section-title" style="cursor:pointer" onclick="toggleRecs(this)">
+      Recommendations <span class="count">${recs.length}</span>
+      <span class="rec-summary">${summary.join(', ')}</span>
+      <span class="rec-toggle">▾</span>
+    </div>
+    <div class="rec-list">`;
+
+  for (const rec of recs) {
+    html += `<div class="rec-item rec-${rec.severity}">
+      <span class="rec-icon">${rec.icon}</span>
+      <span class="rec-message">${rec.message}</span>
+    </div>`;
+  }
+
+  html += `</div></div>`;
+  return html;
+}
+
+function toggleRecs(el) {
+  const list = el.nextElementSibling;
+  const toggle = el.querySelector('.rec-toggle');
+  if (list.style.display === 'none') {
+    list.style.display = '';
+    toggle.textContent = '▾';
+  } else {
+    list.style.display = 'none';
+    toggle.textContent = '▸';
+  }
+}
+
 function render(data) {
   const dashboard = document.getElementById('dashboard');
   const updateEl = document.getElementById('last-update');
@@ -220,6 +355,11 @@ function render(data) {
       `;
 
       html += renderOverviewCards(node);
+
+      const recs = generateRecommendations(node);
+      if (recs.length > 0) {
+        html += renderRecommendations(recs);
+      }
 
       // VMs
       const sortedVms = [...node.vms].sort((a, b) => {

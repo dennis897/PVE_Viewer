@@ -431,6 +431,97 @@ header {
   color: var(--text);
 }
 
+/* Recommendations */
+.recommendations-section {
+  margin-bottom: 20px;
+}
+
+.recommendations-section .section-title {
+  margin-top: 0;
+}
+
+.rec-summary {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-dim);
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rec-toggle {
+  font-size: 14px;
+  margin-left: 8px;
+  color: var(--text-dim);
+}
+
+.rec-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.rec-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid;
+}
+
+.rec-icon {
+  font-weight: 700;
+  font-size: 12px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rec-critical {
+  background: rgba(248, 113, 113, 0.08);
+  border-color: rgba(248, 113, 113, 0.25);
+  color: var(--text);
+}
+
+.rec-critical .rec-icon {
+  background: rgba(248, 113, 113, 0.2);
+  color: var(--red);
+}
+
+.rec-warning {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.2);
+  color: var(--text);
+}
+
+.rec-warning .rec-icon {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--yellow);
+}
+
+.rec-info {
+  background: rgba(45, 124, 246, 0.08);
+  border-color: rgba(45, 124, 246, 0.2);
+  color: var(--text);
+}
+
+.rec-info .rec-icon {
+  background: rgba(45, 124, 246, 0.2);
+  color: var(--accent);
+}
+
+.rec-message {
+  flex: 1;
+  padding-top: 2px;
+}
+
 /* Storage detail content list */
 .content-table {
   width: 100%;
