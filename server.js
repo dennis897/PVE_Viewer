@@ -41,16 +41,16 @@ async function fetchPbsData() {
   if (!pbsEnabled) return null;
 
   const [datastores, nodeStatus, tasks] = await Promise.all([
-    pbsApi('/admin/datastore').catch(() => []),
-    pbsApi('/nodes/localhost/status').catch(() => null),
-    pbsApi('/nodes/localhost/tasks?limit=50&typefilter=backup').catch(() => [])
+    pbsApi('/admin/datastore').catch(e => { console.error('PBS datastores error:', e.message); return []; }),
+    pbsApi('/nodes/localhost/status').catch(e => { console.error('PBS node status error:', e.message); return null; }),
+    pbsApi('/nodes/localhost/tasks?limit=50&typefilter=backup').catch(e => { console.error('PBS tasks error:', e.message); return []; })
   ]);
 
   const datastoreDetails = await Promise.all(
     datastores.map(async (ds) => {
       const [status, snapshots] = await Promise.all([
-        pbsApi(`/admin/datastore/${ds.store}/status`).catch(() => null),
-        pbsApi(`/admin/datastore/${ds.store}/snapshots`).catch(() => [])
+        pbsApi(`/admin/datastore/${ds.store}/status`).catch(e => { console.error(`PBS datastore ${ds.store} status error:`, e.message); return null; }),
+        pbsApi(`/admin/datastore/${ds.store}/snapshots`).catch(e => { console.error(`PBS datastore ${ds.store} snapshots error:`, e.message); return []; })
       ]);
 
       const guestBackups = {};
