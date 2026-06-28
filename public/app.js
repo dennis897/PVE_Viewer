@@ -1,6 +1,7 @@
 let refreshInterval = 30000;
 let refreshTimer = null;
 let currentNodes = [];
+let nodeDataMap = {};
 
 async function fetchData() {
   const indicator = document.getElementById('status-indicator');
@@ -86,14 +87,14 @@ function renderOverviewCards(node) {
 
   return `
     <div class="overview-grid">
-      <div class="overview-card">
-        <div class="label">CPU</div>
+      <div class="overview-card clickable" onclick="toggleBreakdown('cpu', '${node.name}')">
+        <div class="label">CPU <span class="breakdown-hint">▾</span></div>
         <div class="value">${cpuPct}%</div>
         <div class="sub">${node.maxcpu || '—'} cores</div>
         ${progressBar(cpuPct)}
       </div>
-      <div class="overview-card">
-        <div class="label">Memory</div>
+      <div class="overview-card clickable" onclick="toggleBreakdown('mem', '${node.name}')">
+        <div class="label">Memory <span class="breakdown-hint">▾</span></div>
         <div class="value">${memPct}%</div>
         <div class="sub">${formatBytes(node.mem)} / ${formatBytes(node.maxmem)}</div>
         ${progressBar(memPct)}
@@ -109,7 +110,96 @@ function renderOverviewCards(node) {
         <div class="sub">${node.status === 'online' ? 'Online' : 'Offline'}</div>
       </div>
     </div>
+    <div id="breakdown-${node.name}" class="breakdown-panel hidden"></div>
   `;
+}
+
+function toggleBreakdown(metric, nodeName) {
+  const panel = document.getElementById(`breakdown-${nodeName}`);
+  const node = nodeDataMap[nodeName];
+  if (!node) return;
+
+  const isOpen = !panel.classList.contains('hidden') && panel.dataset.metric === metric;
+  if (isOpen) {
+    panel.classList.add('hidden');
+    panel.dataset.metric = '';
+    return;
+  }
+
+  panel.dataset.metric = metric;
+  panel.classList.remove('hidden');
+
+  const allGuests = [
+    ...node.vms.map(v => ({ ...v, gtype: 'VM' })),
+    ...node.lxcs.map(c => ({ ...c, gtype: 'LXC' }))
+  ].filter(g => g.status === 'running');
+
+  let ranked;
+  if (metric === 'cpu') {
+    ranked = allGuests.map(g => {
+      const guestCores = g.maxcpu || 1;
+      const nodeContrib = ((g.cpu || 0) * guestCores) / (node.maxcpu || 1) * 100;
+      return { ...g, contribution: nodeContrib, detail: `${Math.round((g.cpu || 0) * 100)}% of ${guestCores} core${guestCores > 1 ? 's' : ''}` };
+    }).sort((a, b) => b.contribution - a.contribution);
+  } else {
+    ranked = allGuests.map(g => {
+      const nodeContrib = (g.mem || 0) / (node.maxmem || 1) * 100;
+      return { ...g, contribution: nodeContrib, detail: `${formatBytes(g.mem)} / ${formatBytes(g.maxmem)} allocated` };
+    }).sort((a, b) => b.contribution - a.contribution);
+  }
+
+  const label = metric === 'cpu' ? 'CPU' : 'Memory';
+  const totalPct = metric === 'cpu' ? Math.round((node.cpu || 0) * 100) : pct(node.mem, node.maxmem);
+  const accountedPct = ranked.reduce((sum, g) => sum + g.contribution, 0);
+  const systemPct = Math.max(0, totalPct - accountedPct);
+
+  let html = `<div class="breakdown-header">
+    <span class="breakdown-title">${label} Breakdown by Guest</span>
+    <span class="breakdown-close" onclick="event.stopPropagation();document.getElementById('breakdown-${nodeName}').classList.add('hidden')">✕</span>
+  </div>`;
+
+  html += `<div class="breakdown-list">`;
+  for (const g of ranked) {
+    const name = g.name || `${g.gtype} ${g.vmid}`;
+    const contribRounded = g.contribution.toFixed(1);
+    const barWidth = Math.max(1, (g.contribution / Math.max(totalPct, 1)) * 100);
+    const color = g.gtype === 'VM' ? 'var(--accent)' : 'var(--purple)';
+
+    html += `<div class="breakdown-row">
+      <div class="breakdown-row-header">
+        <span class="breakdown-guest-name">
+          <span class="guest-icon mini ${g.gtype.toLowerCase()}">${g.gtype === 'VM' ? '⊞' : '⊡'}</span>
+          ${name}
+          <span class="breakdown-vmid">${g.gtype} ${g.vmid}</span>
+        </span>
+        <span class="breakdown-pct">${contribRounded}%</span>
+      </div>
+      <div class="breakdown-bar-row">
+        <div class="progress-bar breakdown-bar"><div class="progress-fill" style="width:${barWidth}%;background:${color}"></div></div>
+        <span class="breakdown-detail">${g.detail}</span>
+      </div>
+    </div>`;
+  }
+
+  if (systemPct > 0.5) {
+    const barWidth = Math.max(1, (systemPct / Math.max(totalPct, 1)) * 100);
+    html += `<div class="breakdown-row">
+      <div class="breakdown-row-header">
+        <span class="breakdown-guest-name">
+          <span class="guest-icon mini system">⚙</span>
+          System / Proxmox
+        </span>
+        <span class="breakdown-pct">${systemPct.toFixed(1)}%</span>
+      </div>
+      <div class="breakdown-bar-row">
+        <div class="progress-bar breakdown-bar"><div class="progress-fill" style="width:${barWidth}%;background:var(--text-dim)"></div></div>
+        <span class="breakdown-detail">Host OS, hypervisor, and overhead</span>
+      </div>
+    </div>`;
+  }
+
+  html += `</div>`;
+  panel.innerHTML = html;
 }
 
 function renderGuestCard(guest, type, nodeName) {
@@ -340,9 +430,11 @@ function render(data) {
   updateEl.textContent = `Updated ${time.toLocaleTimeString()}`;
 
   let html = '';
+  nodeDataMap = {};
 
   for (const host of data.hosts) {
     for (const node of host.nodes) {
+      nodeDataMap[node.name] = node;
       html += `<div class="node-section">`;
 
       html += `
