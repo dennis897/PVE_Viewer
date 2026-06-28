@@ -79,6 +79,15 @@ async function fetchHostData(host) {
   return hostData;
 }
 
+function parseSize(str) {
+  const num = parseFloat(str);
+  if (str.endsWith('T')) return num * 1024 * 1024 * 1024 * 1024;
+  if (str.endsWith('G')) return num * 1024 * 1024 * 1024;
+  if (str.endsWith('M')) return num * 1024 * 1024;
+  if (str.endsWith('K')) return num * 1024;
+  return num * 1024 * 1024 * 1024;
+}
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/data', async (req, res) => {
@@ -150,16 +159,48 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
     const dependents = [];
     for (const guest of allGuests) {
       const cfg = guest.config;
-      const usesStorage = Object.entries(cfg).some(([key, val]) => {
-        if (typeof val !== 'string') return false;
-        return val.startsWith(`${storage}:`) || val.includes(`${storage}:`);
-      });
-      if (usesStorage) {
-        dependents.push({ vmid: guest.vmid, name: guest.name, status: guest.status, type: guest.type });
+      const disksOnStorage = [];
+      for (const [key, val] of Object.entries(cfg)) {
+        if (typeof val !== 'string') continue;
+        if (!val.includes(`${storage}:`)) continue;
+        const sizeMatch = val.match(/size=(\d+[GMTK]?)/i);
+        let sizeBytes = 0;
+        if (sizeMatch) {
+          sizeBytes = parseSize(sizeMatch[1]);
+        }
+        disksOnStorage.push({ key, value: val, size: sizeBytes });
+      }
+      if (disksOnStorage.length > 0) {
+        const totalAllocated = disksOnStorage.reduce((sum, d) => sum + d.size, 0);
+        dependents.push({
+          vmid: guest.vmid,
+          name: guest.name,
+          status: guest.status,
+          type: guest.type,
+          disks: disksOnStorage,
+          totalAllocated
+        });
       }
     }
 
-    res.json({ status, content, dependents, rrdHour });
+    // For ZFS/pools where content API returns empty, fetch actual disk usage from guest status
+    const guestUsage = await Promise.all(
+      dependents.map(async (dep) => {
+        try {
+          const endpoint = dep.type === 'qemu' ? 'qemu' : 'lxc';
+          const guestStatus = await pveApi(host, `/nodes/${node}/${endpoint}/${dep.vmid}/status/current`);
+          return {
+            ...dep,
+            actualDisk: guestStatus.disk || 0,
+            maxDisk: guestStatus.maxdisk || 0
+          };
+        } catch {
+          return dep;
+        }
+      })
+    );
+
+    res.json({ status, content, dependents: guestUsage, rrdHour });
   } catch (err) {
     console.error('Storage detail error:', err.message);
     res.status(500).json({ error: err.message });

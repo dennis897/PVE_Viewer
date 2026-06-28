@@ -550,19 +550,61 @@ function renderStorageDetail(data, storageName) {
     html += `</tbody></table></div></div>`;
   }
 
-  // Dependents
+  // Dependents with disk allocation breakdown
   if (dependents && dependents.length > 0) {
+    const totalAllocatedAll = dependents.reduce((sum, d) => sum + (d.totalAllocated || 0), 0);
+    const totalActualUsed = dependents.reduce((sum, d) => sum + (d.actualDisk || 0), 0);
+
     html += `<div class="detail-section">
-      <h3>Dependent Guests (${dependents.length})</h3>
-      <div class="dependents-list">`;
-    for (const dep of dependents) {
-      const typeLabel = dep.type === 'qemu' ? 'VM' : 'LXC';
-      html += `<div class="dependent-card">
-        <div>
-          <div class="dep-name">${dep.name || `${typeLabel} ${dep.vmid}`}</div>
-          <div class="dep-id">${typeLabel} ${dep.vmid}</div>
+      <h3>Guest Disk Usage (${dependents.length} guests)</h3>`;
+
+    if (totalAllocatedAll > 0 || totalActualUsed > 0) {
+      html += `<div class="detail-grid" style="margin-bottom:14px">
+        <div class="detail-item">
+          <div class="label">Total Allocated</div>
+          <div class="value">${formatBytes(totalAllocatedAll)}</div>
         </div>
-        <span class="guest-status ${dep.status}">${dep.status}</span>
+        <div class="detail-item">
+          <div class="label">Actual Used</div>
+          <div class="value">${formatBytes(totalActualUsed)}</div>
+        </div>
+      </div>`;
+    }
+
+    const sortedDeps = [...dependents].sort((a, b) => (b.totalAllocated || b.maxDisk || 0) - (a.totalAllocated || a.maxDisk || 0));
+    const maxAlloc = Math.max(...sortedDeps.map(d => d.totalAllocated || d.maxDisk || 0), 1);
+
+    html += `<div class="dependents-list">`;
+    for (const dep of sortedDeps) {
+      const typeLabel = dep.type === 'qemu' ? 'VM' : 'LXC';
+      const allocated = dep.totalAllocated || dep.maxDisk || 0;
+      const actual = dep.actualDisk || 0;
+      const diskPctUsed = dep.maxDisk ? pct(actual, dep.maxDisk) : 0;
+      const barWidth = Math.max(2, (allocated / maxAlloc) * 100);
+
+      let diskDetails = '';
+      if (dep.disks && dep.disks.length > 0) {
+        diskDetails = dep.disks.map(d => {
+          const diskLabel = d.key;
+          const sizeStr = d.size ? formatBytes(d.size) : '—';
+          return `<span style="font-size:12px;color:var(--text-dim)">${diskLabel}: ${sizeStr}</span>`;
+        }).join(' &nbsp; ');
+      }
+
+      html += `<div class="dependent-card" style="flex-direction:column;align-items:stretch;gap:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="dep-name">${dep.name || `${typeLabel} ${dep.vmid}`}</div>
+            <div class="dep-id">${typeLabel} ${dep.vmid}</div>
+          </div>
+          <span class="guest-status ${dep.status}">${dep.status}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:13px">
+          <span>Allocated: <strong>${formatBytes(allocated)}</strong></span>
+          ${actual > 0 ? `<span>Used: <strong>${formatBytes(actual)}</strong> (${diskPctUsed}%)</span>` : ''}
+        </div>
+        <div class="progress-bar"><div class="progress-fill ${progressColor(diskPctUsed)}" style="width:${diskPctUsed || barWidth}%"></div></div>
+        ${diskDetails ? `<div style="display:flex;gap:12px;flex-wrap:wrap">${diskDetails}</div>` : ''}
       </div>`;
     }
     html += `</div></div>`;
