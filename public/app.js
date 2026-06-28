@@ -429,15 +429,15 @@ function render(data) {
   const time = new Date(data.timestamp);
   updateEl.textContent = `Updated ${time.toLocaleTimeString()}`;
 
-  let html = '';
+  let pveHtml = '';
   nodeDataMap = {};
 
   for (const host of data.hosts) {
     for (const node of host.nodes) {
       nodeDataMap[node.name] = node;
-      html += `<div class="node-section">`;
+      pveHtml += `<div class="node-section">`;
 
-      html += `
+      pveHtml += `
         <div class="node-header">
           <h2>${node.name}</h2>
           <span class="node-status-badge ${node.status}">${node.status}</span>
@@ -446,11 +446,11 @@ function render(data) {
         </div>
       `;
 
-      html += renderOverviewCards(node);
+      pveHtml += renderOverviewCards(node);
 
       const recs = generateRecommendations(node);
       if (recs.length > 0) {
-        html += renderRecommendations(recs);
+        pveHtml += renderRecommendations(recs);
       }
 
       // VMs
@@ -461,12 +461,12 @@ function render(data) {
       });
 
       if (sortedVms.length > 0) {
-        html += `<div class="section-title">Virtual Machines <span class="count">${sortedVms.length}</span></div>`;
-        html += `<div class="guest-grid">`;
+        pveHtml += `<div class="section-title">Virtual Machines <span class="count">${sortedVms.length}</span></div>`;
+        pveHtml += `<div class="guest-grid">`;
         for (const vm of sortedVms) {
-          html += renderGuestCard(vm, 'vm', node.name);
+          pveHtml += renderGuestCard(vm, 'vm', node.name);
         }
-        html += `</div>`;
+        pveHtml += `</div>`;
       }
 
       // LXCs
@@ -477,31 +477,39 @@ function render(data) {
       });
 
       if (sortedLxcs.length > 0) {
-        html += `<div class="section-title">LXC Containers <span class="count">${sortedLxcs.length}</span></div>`;
-        html += `<div class="guest-grid">`;
+        pveHtml += `<div class="section-title">LXC Containers <span class="count">${sortedLxcs.length}</span></div>`;
+        pveHtml += `<div class="guest-grid">`;
         for (const ct of sortedLxcs) {
-          html += renderGuestCard(ct, 'lxc', node.name);
+          pveHtml += renderGuestCard(ct, 'lxc', node.name);
         }
-        html += `</div>`;
+        pveHtml += `</div>`;
       }
 
       // Storage
       const activeStorages = node.storages.filter(s => s.active);
       if (activeStorages.length > 0) {
-        html += `<div class="section-title">Storage <span class="count">${activeStorages.length}</span></div>`;
-        html += `<div class="storage-grid">`;
+        pveHtml += `<div class="section-title">Storage <span class="count">${activeStorages.length}</span></div>`;
+        pveHtml += `<div class="storage-grid">`;
         for (const s of activeStorages) {
-          html += renderStorageCard(s, node.name);
+          pveHtml += renderStorageCard(s, node.name);
         }
-        html += `</div>`;
+        pveHtml += `</div>`;
       }
 
-      html += `</div>`;
+      pveHtml += `</div>`;
     }
   }
 
-  if (data.pbs) {
-    html += renderPbsSection(data.pbs);
+  let html = '';
+  const hasPbs = !!data.pbs;
+
+  if (hasPbs) {
+    html += `<div class="dashboard-columns">`;
+    html += `<div class="dashboard-col pve-col">${pveHtml}</div>`;
+    html += `<div class="dashboard-col pbs-col">${renderPbsSection(data.pbs)}</div>`;
+    html += `</div>`;
+  } else {
+    html = pveHtml;
   }
 
   if (!html) {
