@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proxmox View</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <h1>Proxmox View</h1>
+      <span id="last-update" class="meta"></span>
+    </div>
+    <div class="header-right">
+      <span id="status-indicator" class="status-dot"></span>
+      <button id="refresh-btn" title="Refresh now">↻</button>
+    </div>
+  </header>
+
+  <div id="error-banner" class="error-banner hidden"></div>
+  <div id="dashboard"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
