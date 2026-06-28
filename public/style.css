@@ -994,6 +994,44 @@ header {
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px;
+  border-left: 3px solid var(--border);
+}
+
+.pbs-backup-card.backup-fresh {
+  border-left-color: var(--green);
+}
+
+.pbs-backup-card.backup-aging {
+  border-left-color: var(--yellow);
+}
+
+.pbs-backup-card.backup-aging .pbs-backup-detail span:first-child {
+  color: var(--yellow);
+}
+
+.pbs-backup-card.backup-stale {
+  border-left-color: var(--orange);
+  background: rgba(251, 146, 60, 0.05);
+}
+
+.pbs-backup-card.backup-stale .pbs-backup-detail span:first-child {
+  color: var(--orange);
+}
+
+.pbs-backup-card.backup-old {
+  border-left-color: var(--red);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+.pbs-backup-card.backup-old .pbs-backup-detail span:first-child {
+  color: var(--red);
+}
+
+.pbs-backup-card.backup-missing {
+  border-left-color: var(--red);
+  background: rgba(248, 113, 113, 0.08);
+  border-style: dashed;
+  border-left-style: solid;
 }
 
 .pbs-backup-header {

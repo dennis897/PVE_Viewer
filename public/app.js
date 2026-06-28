@@ -506,7 +506,14 @@ function render(data) {
   if (hasPbs) {
     html += `<div class="dashboard-columns">`;
     html += `<div class="dashboard-col pve-col">${pveHtml}</div>`;
-    html += `<div class="dashboard-col pbs-col">${renderPbsSection(data.pbs)}</div>`;
+    const allPveGuests = [];
+    for (const host of data.hosts) {
+      for (const node of host.nodes) {
+        for (const vm of node.vms) allPveGuests.push({ id: String(vm.vmid), type: 'vm', name: vm.name, status: vm.status });
+        for (const ct of node.lxcs) allPveGuests.push({ id: String(ct.vmid), type: 'ct', name: ct.name, status: ct.status });
+      }
+    }
+    html += `<div class="dashboard-col pbs-col">${renderPbsSection(data.pbs, allPveGuests)}</div>`;
     html += `</div>`;
   } else {
     html = pveHtml;
@@ -519,8 +526,17 @@ function render(data) {
   dashboard.innerHTML = html;
 }
 
+function backupAgeClass(epochSecs) {
+  if (!epochSecs) return 'backup-missing';
+  const ageHours = (Date.now() / 1000 - epochSecs) / 3600;
+  if (ageHours <= 26) return 'backup-fresh';
+  if (ageHours <= 50) return 'backup-aging';
+  if (ageHours <= 168) return 'backup-stale';
+  return 'backup-old';
+}
+
 // PBS Section
-function renderPbsSection(pbs) {
+function renderPbsSection(pbs, pveGuests) {
   let html = `<div class="node-section pbs-section">`;
 
   html += `<div class="node-header">
@@ -593,30 +609,59 @@ function renderPbsSection(pbs) {
     </div>`;
 
     // Guest backup table
-    if (ds.guestBackups.length > 0) {
-      html += `<div class="pbs-backup-grid">`;
-      for (const gb of ds.guestBackups) {
-        const typeLabel = gb.type === 'vm' ? 'VM' : gb.type === 'ct' ? 'LXC' : gb.type.toUpperCase();
-        const lastDate = new Date(gb.lastBackup * 1000);
-        const ago = formatTimeAgo(gb.lastBackup);
-        const iconClass = gb.type === 'vm' ? 'vm' : 'lxc';
+    const backedUpIds = new Set(ds.guestBackups.map(gb => `${gb.type}/${gb.id}`));
 
-        html += `<div class="pbs-backup-card">
+    html += `<div class="pbs-backup-grid">`;
+    for (const gb of ds.guestBackups) {
+      const typeLabel = gb.type === 'vm' ? 'VM' : gb.type === 'ct' ? 'LXC' : gb.type.toUpperCase();
+      const ago = formatTimeAgo(gb.lastBackup);
+      const iconClass = gb.type === 'vm' ? 'vm' : 'lxc';
+      const ageClass = backupAgeClass(gb.lastBackup);
+      const pveMatch = (pveGuests || []).find(g => String(g.id) === String(gb.id));
+      const displayName = pveMatch ? pveMatch.name : `${typeLabel} ${gb.id}`;
+
+      html += `<div class="pbs-backup-card ${ageClass}">
+        <div class="pbs-backup-header">
+          <span class="pbs-backup-name">
+            <span class="guest-icon mini ${iconClass}">${gb.type === 'vm' ? '⊞' : '⊡'}</span>
+            ${displayName}
+            <span class="breakdown-vmid">${typeLabel} ${gb.id}</span>
+          </span>
+          <span class="pbs-backup-count">${gb.count} backup${gb.count !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="pbs-backup-detail">
+          <span>Last: ${ago}</span>
+          <span>${formatBytes(gb.size)}</span>
+        </div>
+      </div>`;
+    }
+
+    // Show PVE guests with no backups
+    if (pveGuests) {
+      const unprotected = pveGuests.filter(g => {
+        const pbsType = g.type === 'ct' ? 'ct' : 'vm';
+        return !backedUpIds.has(`${pbsType}/${g.id}`);
+      });
+      for (const g of unprotected) {
+        const typeLabel = g.type === 'ct' ? 'LXC' : 'VM';
+        const iconClass = g.type === 'ct' ? 'lxc' : 'vm';
+        html += `<div class="pbs-backup-card backup-missing">
           <div class="pbs-backup-header">
             <span class="pbs-backup-name">
-              <span class="guest-icon mini ${iconClass}">${gb.type === 'vm' ? '⊞' : '⊡'}</span>
-              ${typeLabel} ${gb.id}
+              <span class="guest-icon mini ${iconClass}">${g.type === 'ct' ? '⊡' : '⊞'}</span>
+              ${g.name || `${typeLabel} ${g.id}`}
+              <span class="breakdown-vmid">${typeLabel} ${g.id}</span>
             </span>
-            <span class="pbs-backup-count">${gb.count} backup${gb.count !== 1 ? 's' : ''}</span>
+            <span class="pbs-backup-count" style="color:var(--red)">not backed up</span>
           </div>
           <div class="pbs-backup-detail">
-            <span>Last: ${ago}</span>
-            <span>${formatBytes(gb.size)}</span>
+            <span style="color:var(--red)">No backups found</span>
           </div>
         </div>`;
       }
-      html += `</div>`;
     }
+
+    html += `</div>`;
   }
 
   // Recent tasks
