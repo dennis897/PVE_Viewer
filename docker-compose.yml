@@ -6,4 +6,5 @@ services:
     ports:
       - "2545:2545"
     env_file:
-      - .env
+      - path: .env
+        required: false

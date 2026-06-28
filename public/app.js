@@ -1,5 +1,6 @@
 let refreshInterval = 30000;
 let refreshTimer = null;
+let currentNodes = [];
 
 async function fetchData() {
   const indicator = document.getElementById('status-indicator');
@@ -111,16 +112,17 @@ function renderOverviewCards(node) {
   `;
 }
 
-function renderGuestCard(guest, type) {
+function renderGuestCard(guest, type, nodeName) {
   const isRunning = guest.status === 'running';
   const cpuPct = isRunning ? Math.round((guest.cpu || 0) * 100) : 0;
   const memPct = isRunning ? pct(guest.mem, guest.maxmem) : 0;
   const diskPct = pct(guest.disk, guest.maxdisk);
   const netIn = guest.netin || 0;
   const netOut = guest.netout || 0;
+  const apiType = type === 'vm' ? 'qemu' : 'lxc';
 
   return `
-    <div class="guest-card">
+    <div class="guest-card" data-node="${nodeName}" data-type="${apiType}" data-vmid="${guest.vmid}" onclick="openDetail(this)">
       <div class="guest-card-header">
         <div class="guest-name">
           <div class="guest-icon ${type}">${type === 'vm' ? '⊞' : '⊡'}</div>
@@ -230,7 +232,7 @@ function render(data) {
         html += `<div class="section-title">Virtual Machines <span class="count">${sortedVms.length}</span></div>`;
         html += `<div class="guest-grid">`;
         for (const vm of sortedVms) {
-          html += renderGuestCard(vm, 'vm');
+          html += renderGuestCard(vm, 'vm', node.name);
         }
         html += `</div>`;
       }
@@ -246,7 +248,7 @@ function render(data) {
         html += `<div class="section-title">LXC Containers <span class="count">${sortedLxcs.length}</span></div>`;
         html += `<div class="guest-grid">`;
         for (const ct of sortedLxcs) {
-          html += renderGuestCard(ct, 'lxc');
+          html += renderGuestCard(ct, 'lxc', node.name);
         }
         html += `</div>`;
       }
@@ -273,6 +275,177 @@ function render(data) {
   dashboard.innerHTML = html;
 }
 
+// Detail panel
+function openDetail(el) {
+  const node = el.dataset.node;
+  const type = el.dataset.type;
+  const vmid = el.dataset.vmid;
+  const name = el.querySelector('.guest-name-text strong').textContent;
+
+  document.getElementById('detail-title').textContent = `${name} (${type === 'qemu' ? 'VM' : 'LXC'} ${vmid})`;
+  document.getElementById('detail-body').innerHTML = '<div class="detail-loading">Loading...</div>';
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+
+  fetch(`/api/guest/${node}/${type}/${vmid}`)
+    .then(r => r.json())
+    .then(data => renderDetail(data, type))
+    .catch(err => {
+      document.getElementById('detail-body').innerHTML = `<div class="detail-loading">Error: ${err.message}</div>`;
+    });
+}
+
+function closeDetail() {
+  document.getElementById('detail-overlay').classList.remove('open');
+  document.getElementById('detail-panel').classList.remove('open');
+}
+
+function renderDetail(data, type) {
+  const body = document.getElementById('detail-body');
+  const { config, status, snapshots, rrdHour } = data;
+  let html = '';
+
+  // Status section
+  const isRunning = status.status === 'running';
+  const cpuPct = Math.round((status.cpu || 0) * 100);
+  const memPct = pct(status.mem, status.maxmem);
+  const diskPct = pct(status.disk, status.maxdisk);
+
+  html += `<div class="detail-section">
+    <h3>Current Status</h3>
+    <div class="detail-grid">
+      <div class="detail-item">
+        <div class="label">Status</div>
+        <div class="value"><span class="guest-status ${status.status}">${status.status}</span></div>
+      </div>
+      <div class="detail-item">
+        <div class="label">Uptime</div>
+        <div class="value">${formatUptime(status.uptime)}</div>
+      </div>
+      <div class="detail-item">
+        <div class="label">CPU Usage</div>
+        <div class="value">${cpuPct}%</div>
+        ${progressBar(cpuPct)}
+      </div>
+      <div class="detail-item">
+        <div class="label">Memory</div>
+        <div class="value">${formatBytes(status.mem)} / ${formatBytes(status.maxmem)} (${memPct}%)</div>
+        ${progressBar(memPct)}
+      </div>
+      <div class="detail-item">
+        <div class="label">Disk</div>
+        <div class="value">${formatBytes(status.disk)} / ${formatBytes(status.maxdisk)} (${diskPct}%)</div>
+        ${progressBar(diskPct)}
+      </div>
+      <div class="detail-item">
+        <div class="label">Network</div>
+        <div class="value">↓ ${formatBytes(status.netin)} ↑ ${formatBytes(status.netout)}</div>
+      </div>
+    </div>
+  </div>`;
+
+  // Config section
+  html += `<div class="detail-section">
+    <h3>Configuration</h3>
+    <div class="detail-grid">`;
+
+  if (type === 'qemu') {
+    html += detailItem('Cores', config.cores || '—');
+    html += detailItem('Sockets', config.sockets || '1');
+    html += detailItem('Memory', formatBytes((config.memory || 0) * 1024 * 1024));
+    html += detailItem('BIOS', config.bios || 'SeaBIOS');
+    html += detailItem('Machine', config.machine || 'default');
+    html += detailItem('OS Type', config.ostype || '—');
+    if (config.boot) html += detailItem('Boot Order', config.boot, true);
+    if (config.scsi0 || config.virtio0 || config.ide0 || config.sata0) {
+      const disk = config.scsi0 || config.virtio0 || config.ide0 || config.sata0;
+      html += detailItem('Primary Disk', disk, true);
+    }
+    if (config.net0) html += detailItem('Network', config.net0, true);
+    if (config.agent) html += detailItem('QEMU Agent', config.agent);
+  } else {
+    html += detailItem('Cores', config.cores || '—');
+    html += detailItem('Memory', formatBytes((config.memory || 0) * 1024 * 1024));
+    html += detailItem('Swap', formatBytes((config.swap || 0) * 1024 * 1024));
+    html += detailItem('OS Type', config.ostype || '—');
+    if (config.rootfs) html += detailItem('Root FS', config.rootfs, true);
+    if (config.net0) html += detailItem('Network', config.net0, true);
+    if (config.hostname) html += detailItem('Hostname', config.hostname);
+    if (config.nameserver) html += detailItem('DNS', config.nameserver);
+    html += detailItem('Unprivileged', config.unprivileged ? 'Yes' : 'No');
+  }
+
+  html += `</div></div>`;
+
+  // Historical charts (last hour)
+  if (rrdHour && rrdHour.length > 0) {
+    html += `<div class="detail-section">
+      <h3>Last Hour</h3>
+      ${renderMiniChart(rrdHour, 'cpu', 'CPU %', v => Math.round((v || 0) * 100), '%')}
+      ${renderMiniChart(rrdHour, 'mem', 'Memory', v => v || 0, '', true)}
+      ${renderMiniChart(rrdHour, 'netin', 'Network In', v => v || 0, '', true)}
+      ${renderMiniChart(rrdHour, 'netout', 'Network Out', v => v || 0, '', true)}
+    </div>`;
+  }
+
+  // Snapshots
+  const realSnapshots = (snapshots || []).filter(s => s.name !== 'current');
+  if (realSnapshots.length > 0) {
+    html += `<div class="detail-section">
+      <h3>Snapshots (${realSnapshots.length})</h3>
+      <div class="snapshot-list">`;
+    for (const snap of realSnapshots) {
+      const date = snap.snaptime ? new Date(snap.snaptime * 1000).toLocaleString() : '—';
+      html += `<div class="snapshot-item">
+        <span class="snap-name">${snap.name}</span>
+        <span class="snap-date">${date}</span>
+      </div>`;
+    }
+    html += `</div></div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function detailItem(label, value, full) {
+  return `<div class="detail-item${full ? ' full' : ''}">
+    <div class="label">${label}</div>
+    <div class="value">${value}</div>
+  </div>`;
+}
+
+function renderMiniChart(rrdData, key, label, transform, suffix, isBytes) {
+  const values = rrdData.map(d => transform(d[key])).filter(v => !isNaN(v));
+  if (values.length === 0) return '';
+
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values);
+  const latest = values[values.length - 1];
+  const w = 480;
+  const h = 50;
+
+  const points = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - ((v - min) / (max - min || 1)) * h;
+    return `${x},${y}`;
+  }).join(' ');
+
+  const latestLabel = isBytes ? formatBytes(latest) : `${latest}${suffix}`;
+
+  return `<div class="chart-container">
+    <div class="chart-label">
+      <span>${label}</span>
+      <span>${latestLabel}</span>
+    </div>
+    <svg class="chart-svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
+      <polyline points="${points}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+    </svg>
+  </div>`;
+}
+
 // Init
 document.getElementById('refresh-btn').addEventListener('click', fetchData);
+document.getElementById('detail-overlay').addEventListener('click', closeDetail);
+document.getElementById('detail-close').addEventListener('click', closeDetail);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 fetchData();

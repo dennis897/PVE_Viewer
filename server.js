@@ -96,6 +96,27 @@ app.get('/api/data', async (req, res) => {
   }
 });
 
+app.get('/api/guest/:node/:type/:vmid', async (req, res) => {
+  try {
+    const { node, type, vmid } = req.params;
+    const host = getHosts()[0];
+    const endpoint = type === 'qemu' ? 'qemu' : 'lxc';
+
+    const [config, status, snapshots, rrdHour, rrdDay] = await Promise.all([
+      pveApi(host, `/nodes/${node}/${endpoint}/${vmid}/config`),
+      pveApi(host, `/nodes/${node}/${endpoint}/${vmid}/status/current`),
+      pveApi(host, `/nodes/${node}/${endpoint}/${vmid}/snapshot`).catch(() => []),
+      pveApi(host, `/nodes/${node}/${endpoint}/${vmid}/rrddata?timeframe=hour`).catch(() => []),
+      pveApi(host, `/nodes/${node}/${endpoint}/${vmid}/rrddata?timeframe=day`).catch(() => [])
+    ]);
+
+    res.json({ config, status, snapshots, rrdHour, rrdDay });
+  } catch (err) {
+    console.error('Guest detail error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Proxmox View running at http://localhost:${PORT}`);
   console.log(`Monitoring: ${getHosts().join(', ')}`);
