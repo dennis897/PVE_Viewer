@@ -5,13 +5,13 @@
 }
 
 :root {
-  --bg: #0f1115;
-  --surface: #1a1d23;
-  --surface-hover: #22262e;
-  --border: #2a2e36;
-  --text: #e4e6ea;
-  --text-dim: #8b8f96;
-  --accent: #4f8ff7;
+  --bg: #0e1a33;
+  --surface: #182b4a;
+  --surface-hover: #1f3558;
+  --border: #234270;
+  --text: #e2e8f0;
+  --text-dim: #7ba4d4;
+  --accent: #2d7cf6;
   --green: #34d399;
   --yellow: #fbbf24;
   --red: #f87171;

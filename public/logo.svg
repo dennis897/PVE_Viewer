@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 220">
+  <defs>
+    <linearGradient id="topFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5ba3ff"/>
+      <stop offset="100%" stop-color="#2d7cf6"/>
+    </linearGradient>
+    <linearGradient id="leftFace" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="rightFace" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <linearGradient id="topFace2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#60a5fa"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="leftFace2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e40af"/>
+      <stop offset="100%" stop-color="#1e3a8a"/>
+    </linearGradient>
+    <linearGradient id="rightFace2" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2563eb"/>
+      <stop offset="100%" stop-color="#1d4ed8"/>
+    </linearGradient>
+    <linearGradient id="topFace3" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#93c5fd"/>
+      <stop offset="100%" stop-color="#60a5fa"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Bottom block (layer 1) -->
+  <!-- Left face -->
+  <polygon points="100,180 20,140 20,115 100,155" fill="url(#leftFace2)"/>
+  <!-- Right face -->
+  <polygon points="100,180 180,140 180,115 100,155" fill="url(#rightFace2)"/>
+  <!-- Top face - chevron -->
+  <polygon points="100,130 20,90 20,115 100,155 180,115 180,90" fill="url(#topFace2)"/>
+  <!-- Chevron notch -->
+  <polygon points="100,155 60,135 60,115 100,135 140,115 140,135" fill="url(#leftFace2)"/>
+
+  <!-- Middle block (layer 2) -->
+  <!-- Left face -->
+  <polygon points="100,145 20,105 20,80 100,120" fill="url(#leftFace)"/>
+  <!-- Right face -->
+  <polygon points="100,145 180,105 180,80 100,120" fill="url(#rightFace)"/>
+  <!-- Top face - chevron -->
+  <polygon points="100,95 20,55 20,80 100,120 180,80 180,55" fill="url(#topFace)"/>
+  <!-- Chevron notch -->
+  <polygon points="100,120 60,100 60,80 100,100 140,80 140,100" fill="url(#leftFace)"/>
+
+  <!-- Top block (layer 3) -->
+  <!-- Left face -->
+  <polygon points="100,110 20,70 20,45 100,85" fill="url(#leftFace)"/>
+  <!-- Right face -->
+  <polygon points="100,110 180,70 180,45 100,85" fill="url(#rightFace)"/>
+  <!-- Top face - chevron -->
+  <polygon points="100,60 20,20 20,45 100,85 180,45 180,20" fill="url(#topFace3)"/>
+  <!-- Chevron notch -->
+  <polygon points="100,85 60,65 60,45 100,65 140,45 140,65" fill="url(#leftFace)"/>
+
+  <!-- Small indicator lights on front faces -->
+  <circle cx="75" cy="100" r="2.5" fill="#34d399" opacity="0.9"/>
+  <circle cx="75" cy="135" r="2.5" fill="#34d399" opacity="0.9"/>
+  <circle cx="75" cy="65" r="2.5" fill="#34d399" opacity="0.9"/>
+</svg>
