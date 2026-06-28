@@ -8,6 +8,6 @@ RUN npm install --production
 COPY server.js ./
 COPY public/ ./public/
 
-EXPOSE 3000
+EXPOSE 2545
 
 CMD ["node", "server.js"]
