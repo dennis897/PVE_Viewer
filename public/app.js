@@ -463,7 +463,7 @@ function openStorageDetail(el) {
 
 function renderStorageDetail(data, storageName) {
   const body = document.getElementById('detail-body');
-  const { status, content, dependents, rrdHour, zfsDetail } = data;
+  const { status, content, dependents, rrdHour, zfsDetail, storageConfig } = data;
   let html = '';
 
   // Overall status
@@ -550,50 +550,70 @@ function renderStorageDetail(data, storageName) {
     html += `</tbody></table></div></div>`;
   }
 
-  // ZFS datasets breakdown
-  if (zfsDetail && zfsDetail.children && zfsDetail.children.length > 0) {
-    const datasets = zfsDetail.children
-      .map(ds => ({
-        name: ds.name || '—',
-        used: ds.used || 0,
-        refer: ds.refer || 0,
-        mountpoint: ds.mountpoint || '—'
-      }))
-      .sort((a, b) => b.used - a.used);
+  // Storage configuration
+  if (storageConfig) {
+    html += `<div class="detail-section">
+      <h3>Configuration</h3>
+      <div class="detail-grid">`;
+    if (storageConfig.content) html += detailItem('Content Types', storageConfig.content.split(',').join(', '));
+    if (storageConfig.pool) html += detailItem('ZFS Pool', storageConfig.pool);
+    if (storageConfig.path) html += detailItem('Path', storageConfig.path);
+    if (storageConfig.mountpoint) html += detailItem('Mount Point', storageConfig.mountpoint);
+    if (storageConfig.nodes) html += detailItem('Nodes', storageConfig.nodes);
+    if (storageConfig.shared !== undefined) html += detailItem('Shared', storageConfig.shared ? 'Yes' : 'No');
+    if (storageConfig.sparse !== undefined) html += detailItem('Thin Provision', storageConfig.sparse ? 'Yes' : 'No');
+    if (storageConfig.blocksize) html += detailItem('Block Size', storageConfig.blocksize);
+    html += `</div></div>`;
+  }
 
-    const maxUsed = Math.max(...datasets.map(d => d.used), 1);
-    const totalUsedByDatasets = datasets.reduce((sum, d) => sum + d.used, 0);
+  // ZFS pool health and devices
+  if (zfsDetail) {
+    const stateColor = zfsDetail.state === 'ONLINE' ? 'var(--green)' :
+                       zfsDetail.state === 'DEGRADED' ? 'var(--yellow)' : 'var(--red)';
 
     html += `<div class="detail-section">
-      <h3>ZFS Datasets (${datasets.length})</h3>
-      <div class="detail-grid" style="margin-bottom:14px">
-        <div class="detail-item full">
-          <div class="label">Total Used by Datasets</div>
-          <div class="value">${formatBytes(totalUsedByDatasets)}</div>
-        </div>
-      </div>
-      <div style="overflow-x:auto;">
-      <table class="content-table">
-        <thead><tr>
-          <th>Dataset</th>
-          <th>Used</th>
-          <th>Referenced</th>
-          <th style="width:120px"></th>
-        </tr></thead>
-        <tbody>`;
+      <h3>ZFS Pool Health</h3>
+      <div class="detail-grid">
+        <div class="detail-item">
+          <div class="label">Pool State</div>
+          <div class="value" style="color:${stateColor}">${zfsDetail.state}</div>
+        </div>`;
+    if (zfsDetail.errors) {
+      html += `<div class="detail-item">
+        <div class="label">Errors</div>
+        <div class="value">${zfsDetail.errors}</div>
+      </div>`;
+    }
+    if (zfsDetail.scan) {
+      html += `<div class="detail-item full">
+        <div class="label">Last Scrub/Scan</div>
+        <div class="value" style="font-size:12px">${zfsDetail.scan}</div>
+      </div>`;
+    }
+    if (zfsDetail.action) {
+      html += `<div class="detail-item full">
+        <div class="label">Action</div>
+        <div class="value" style="font-size:12px">${zfsDetail.action}</div>
+      </div>`;
+    }
+    html += `</div>`;
 
-    for (const ds of datasets) {
-      const barWidth = Math.max(2, (ds.used / maxUsed) * 100);
-      const shortName = ds.name.includes('/') ? ds.name.split('/').pop() : ds.name;
-      html += `<tr>
-        <td title="${ds.name}">${shortName}</td>
-        <td>${formatBytes(ds.used)}</td>
-        <td>${formatBytes(ds.refer)}</td>
-        <td><div class="size-bar"><div class="size-bar-fill" style="width:${barWidth}%;height:6px;border-radius:3px;background:var(--cyan);min-width:2px"></div></div></td>
-      </tr>`;
+    if (zfsDetail.devices && zfsDetail.devices.length > 0) {
+      html += `<div style="margin-top:12px">
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px">DEVICES (${zfsDetail.devices.length})</div>
+        <div class="dependents-list">`;
+      for (const dev of zfsDetail.devices) {
+        const devColor = dev.state === 'ONLINE' ? 'var(--green)' :
+                         dev.state === 'DEGRADED' ? 'var(--yellow)' : 'var(--red)';
+        html += `<div class="dependent-card">
+          <div class="dep-name" style="font-size:13px;font-family:monospace">${dev.name}</div>
+          <span style="color:${devColor};font-size:12px;font-weight:500">${dev.state}</span>
+        </div>`;
+      }
+      html += `</div></div>`;
     }
 
-    html += `</tbody></table></div></div>`;
+    html += `</div>`;
   }
 
   // Dependents with disk allocation breakdown

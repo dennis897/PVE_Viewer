@@ -131,21 +131,45 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
     const { node, storage } = req.params;
     const host = getHosts()[0];
 
-    const [status, content, vms, lxcs, rrdHour, zfsPools] = await Promise.all([
+    const [status, content, vms, lxcs, rrdHour, zfsPools, storageConfig] = await Promise.all([
       pveApi(host, `/nodes/${node}/storage/${storage}/status`),
       pveApi(host, `/nodes/${node}/storage/${storage}/content`).catch(() => []),
       pveApi(host, `/nodes/${node}/qemu`),
       pveApi(host, `/nodes/${node}/lxc`),
       pveApi(host, `/nodes/${node}/storage/${storage}/rrddata?timeframe=day`).catch(() => []),
-      pveApi(host, `/nodes/${node}/disks/zfs`).catch(() => [])
+      pveApi(host, `/nodes/${node}/disks/zfs`).catch(() => []),
+      pveApi(host, `/storage/${storage}`).catch(() => null)
     ]);
 
-    // For ZFS pools, get dataset-level detail
+    // For ZFS pools, get pool health and device layout
     let zfsDetail = null;
     if (status.type === 'zfspool' && Array.isArray(zfsPools)) {
-      const poolName = zfsPools.find(p => p.name === storage || storage.startsWith(p.name));
-      const zfsName = poolName ? poolName.name : storage;
-      zfsDetail = await pveApi(host, `/nodes/${node}/disks/zfs/${zfsName}`).catch(() => null);
+      const poolMatch = zfsPools.find(p => p.name === storage || storage.startsWith(p.name));
+      const zfsName = poolMatch ? poolMatch.name : storage;
+      const poolInfo = await pveApi(host, `/nodes/${node}/disks/zfs/${zfsName}`).catch(() => null);
+      if (poolInfo) {
+        // Flatten the vdev tree to extract disk devices
+        const devices = [];
+        function walkVdevs(nodes) {
+          if (!Array.isArray(nodes)) return;
+          for (const n of nodes) {
+            if (n.leaf) {
+              devices.push({ name: n.name, state: n.msg || n.state || 'ONLINE' });
+            }
+            if (n.children) walkVdevs(n.children);
+          }
+        }
+        walkVdevs(poolInfo.children);
+
+        zfsDetail = {
+          name: poolInfo.name || zfsName,
+          state: poolInfo.state || poolMatch?.health || 'UNKNOWN',
+          scan: poolInfo.scan || null,
+          action: poolInfo.action || null,
+          errors: poolInfo.errors || null,
+          devices
+        };
+      }
     }
 
     const vmConfigs = await Promise.all(
@@ -209,7 +233,7 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
       })
     );
 
-    res.json({ status, content, dependents: guestUsage, rrdHour, zfsDetail });
+    res.json({ status, content, dependents: guestUsage, rrdHour, zfsDetail, storageConfig });
   } catch (err) {
     console.error('Storage detail error:', err.message);
     res.status(500).json({ error: err.message });
