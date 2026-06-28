@@ -5,5 +5,9 @@ services:
     restart: unless-stopped
     ports:
       - "3000:3000"
-    env_file:
-      - .env
+    environment:
+      - PROXMOX_HOST=${PROXMOX_HOST:-https://your-proxmox-ip:8006}
+      - PROXMOX_TOKEN_ID=${PROXMOX_TOKEN_ID}
+      - PROXMOX_TOKEN_SECRET=${PROXMOX_TOKEN_SECRET}
+      - PORT=${PORT:-3000}
+      - REFRESH_INTERVAL=${REFRESH_INTERVAL:-30000}
