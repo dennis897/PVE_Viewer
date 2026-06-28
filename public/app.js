@@ -463,7 +463,7 @@ function openStorageDetail(el) {
 
 function renderStorageDetail(data, storageName) {
   const body = document.getElementById('detail-body');
-  const { status, content, dependents, rrdHour } = data;
+  const { status, content, dependents, rrdHour, zfsDetail } = data;
   let html = '';
 
   // Overall status
@@ -545,6 +545,52 @@ function renderStorageDetail(data, storageName) {
     }
     if (sorted.length > 50) {
       html += `<tr><td colspan="4" style="color:var(--text-dim);text-align:center">...and ${sorted.length - 50} more items</td></tr>`;
+    }
+
+    html += `</tbody></table></div></div>`;
+  }
+
+  // ZFS datasets breakdown
+  if (zfsDetail && zfsDetail.children && zfsDetail.children.length > 0) {
+    const datasets = zfsDetail.children
+      .map(ds => ({
+        name: ds.name || '—',
+        used: ds.used || 0,
+        refer: ds.refer || 0,
+        mountpoint: ds.mountpoint || '—'
+      }))
+      .sort((a, b) => b.used - a.used);
+
+    const maxUsed = Math.max(...datasets.map(d => d.used), 1);
+    const totalUsedByDatasets = datasets.reduce((sum, d) => sum + d.used, 0);
+
+    html += `<div class="detail-section">
+      <h3>ZFS Datasets (${datasets.length})</h3>
+      <div class="detail-grid" style="margin-bottom:14px">
+        <div class="detail-item full">
+          <div class="label">Total Used by Datasets</div>
+          <div class="value">${formatBytes(totalUsedByDatasets)}</div>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+      <table class="content-table">
+        <thead><tr>
+          <th>Dataset</th>
+          <th>Used</th>
+          <th>Referenced</th>
+          <th style="width:120px"></th>
+        </tr></thead>
+        <tbody>`;
+
+    for (const ds of datasets) {
+      const barWidth = Math.max(2, (ds.used / maxUsed) * 100);
+      const shortName = ds.name.includes('/') ? ds.name.split('/').pop() : ds.name;
+      html += `<tr>
+        <td title="${ds.name}">${shortName}</td>
+        <td>${formatBytes(ds.used)}</td>
+        <td>${formatBytes(ds.refer)}</td>
+        <td><div class="size-bar"><div class="size-bar-fill" style="width:${barWidth}%;height:6px;border-radius:3px;background:var(--cyan);min-width:2px"></div></div></td>
+      </tr>`;
     }
 
     html += `</tbody></table></div></div>`;
