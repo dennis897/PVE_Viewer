@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const https = require('https');
 const path = require('path');
 
-const { startNotifier } = require('./notifier');
+const { startNotifier, sendGotify, isGotifyEnabled } = require('./notifier');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -333,6 +333,22 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
     res.json({ status, content, dependents: guestUsage, rrdHour, zfsDetail, storageConfig });
   } catch (err) {
     console.error('Storage detail error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/notifier/status', (req, res) => {
+  res.json({ enabled: isGotifyEnabled() });
+});
+
+app.post('/api/notifier/test', async (req, res) => {
+  if (!isGotifyEnabled()) {
+    return res.status(400).json({ error: 'Gotify not configured' });
+  }
+  try {
+    await sendGotify('Test Notification', 'PVE Viewer notification system is working.', 5);
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

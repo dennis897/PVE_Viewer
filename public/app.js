@@ -1131,6 +1131,39 @@ function renderStorageDetail(data, storageName) {
   body.innerHTML = html;
 }
 
+// Gotify test button
+const testNotifyBtn = document.getElementById('test-notify-btn');
+
+fetch('/api/notifier/status').then(r => r.json()).then(data => {
+  if (data.enabled) testNotifyBtn.classList.remove('hidden');
+}).catch(() => {});
+
+testNotifyBtn.addEventListener('click', async () => {
+  testNotifyBtn.disabled = true;
+  testNotifyBtn.textContent = '🔔 Sending...';
+  testNotifyBtn.className = 'notify-btn';
+  try {
+    const res = await fetch('/api/notifier/test', { method: 'POST' });
+    if (res.ok) {
+      testNotifyBtn.textContent = '🔔 Sent!';
+      testNotifyBtn.classList.add('success');
+    } else {
+      const err = await res.json();
+      testNotifyBtn.textContent = '🔔 Failed';
+      testNotifyBtn.classList.add('error');
+      console.error('Notify test failed:', err.error);
+    }
+  } catch (e) {
+    testNotifyBtn.textContent = '🔔 Failed';
+    testNotifyBtn.classList.add('error');
+  }
+  testNotifyBtn.disabled = false;
+  setTimeout(() => {
+    testNotifyBtn.textContent = '🔔 Test';
+    testNotifyBtn.className = 'notify-btn';
+  }, 3000);
+});
+
 // Init
 document.getElementById('refresh-btn').addEventListener('click', fetchData);
 document.getElementById('detail-overlay').addEventListener('click', closeDetail);

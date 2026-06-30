@@ -84,6 +84,32 @@ header {
   50% { opacity: 0.4; }
 }
 
+.notify-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.notify-btn:hover {
+  background: var(--surface-hover);
+  border-color: var(--accent);
+}
+
+.notify-btn.success {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.notify-btn.error {
+  border-color: var(--red);
+  color: var(--red);
+}
+
 #refresh-btn {
   background: none;
   border: 1px solid var(--border);

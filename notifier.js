@@ -314,4 +314,8 @@ function startNotifier(fetchHostData, getHosts, pveApi) {
   }, NOTIFY_INTERVAL);
 }
 
-module.exports = { startNotifier };
+function isGotifyEnabled() {
+  return !!(GOTIFY_URL && GOTIFY_TOKEN);
+}
+
+module.exports = { startNotifier, sendGotify, isGotifyEnabled };
