@@ -301,10 +301,16 @@ function startNotifier(fetchHostData, getHosts, pveApi) {
   console.log(`[Notifier] CPU sustained threshold: ${CPU_SUSTAIN_MINUTES} minutes`);
   console.log(`[Notifier] Gotify: ${GOTIFY_URL}`);
 
-  checkAlerts(fetchHostData, getHosts, pveApi);
+  setTimeout(() => {
+    checkAlerts(fetchHostData, getHosts, pveApi).catch(err => {
+      console.error('[Notifier] Initial check error:', err.message);
+    });
+  }, 5000);
 
   setInterval(() => {
-    checkAlerts(fetchHostData, getHosts, pveApi);
+    checkAlerts(fetchHostData, getHosts, pveApi).catch(err => {
+      console.error('[Notifier] Check error:', err.message);
+    });
   }, NOTIFY_INTERVAL);
 }
 
