@@ -4,6 +4,8 @@ const fetch = require('node-fetch');
 const https = require('https');
 const path = require('path');
 
+const { startNotifier } = require('./notifier');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 const REFRESH_INTERVAL = parseInt(process.env.REFRESH_INTERVAL) || 30000;
@@ -340,4 +342,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Monitoring: ${getHosts().join(', ')}`);
   if (pbsEnabled) console.log(`PBS: ${PBS_HOST}`);
   console.log(`Refresh interval: ${REFRESH_INTERVAL}ms`);
+  startNotifier(fetchHostData, getHosts, pveApi);
 });
