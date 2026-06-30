@@ -4,7 +4,7 @@ const fetch = require('node-fetch');
 const https = require('https');
 const path = require('path');
 
-const { startNotifier, sendGotify, isGotifyEnabled } = require('./notifier');
+const { startNotifier, sendGotify, isGotifyEnabled, getSettings, saveSettings, DEFAULTS } = require('./notifier');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -337,8 +337,23 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
   }
 });
 
+app.use(express.json());
+
 app.get('/api/notifier/status', (req, res) => {
   res.json({ enabled: isGotifyEnabled() });
+});
+
+app.get('/api/settings', (req, res) => {
+  res.json({ settings: getSettings(), defaults: DEFAULTS, gotifyEnabled: isGotifyEnabled() });
+});
+
+app.post('/api/settings', (req, res) => {
+  try {
+    const saved = saveSettings(req.body);
+    res.json({ settings: saved });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/notifier/test', async (req, res) => {

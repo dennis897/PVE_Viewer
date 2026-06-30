@@ -1131,6 +1131,145 @@ function renderStorageDetail(data, storageName) {
   body.innerHTML = html;
 }
 
+// Settings panel
+const settingsBtn = document.getElementById('settings-btn');
+const settingsPanel = document.getElementById('settings-panel');
+const settingsOverlay = document.getElementById('settings-overlay');
+const settingsClose = document.getElementById('settings-close');
+const settingsSave = document.getElementById('settings-save');
+const settingsReset = document.getElementById('settings-reset');
+const settingsStatus = document.getElementById('settings-status');
+const settingsNoGotify = document.getElementById('settings-no-gotify');
+
+let currentDefaults = null;
+
+function openSettings() {
+  settingsPanel.classList.add('open');
+  settingsOverlay.classList.add('open');
+  loadSettingsForm();
+}
+
+function closeSettings() {
+  settingsPanel.classList.remove('open');
+  settingsOverlay.classList.remove('open');
+  settingsStatus.textContent = '';
+  settingsStatus.className = 'settings-status';
+}
+
+async function loadSettingsForm() {
+  try {
+    const res = await fetch('/api/settings');
+    const data = await res.json();
+    currentDefaults = data.defaults;
+    populateForm(data.settings);
+    if (!data.gotifyEnabled) {
+      settingsNoGotify.classList.remove('hidden');
+    } else {
+      settingsNoGotify.classList.add('hidden');
+    }
+  } catch (e) {
+    settingsStatus.textContent = 'Failed to load settings';
+    settingsStatus.className = 'settings-status error';
+  }
+}
+
+function populateForm(s) {
+  const thresholds = s.thresholds;
+  document.getElementById('s-guestMemory').value = thresholds.guestMemory;
+  document.getElementById('s-guestCpu').value = thresholds.guestCpu;
+  document.getElementById('s-guestSwap').value = thresholds.guestSwap;
+  document.getElementById('s-guestDisk').value = thresholds.guestDisk;
+  document.getElementById('s-nodeMemory').value = thresholds.nodeMemory;
+  document.getElementById('s-nodeCpu').value = thresholds.nodeCpu;
+  document.getElementById('s-storage').value = thresholds.storage;
+
+  document.getElementById('s-cpuSustain').value = s.cpuSustainMinutes;
+  document.getElementById('s-interval').value = s.notifyInterval;
+  document.getElementById('s-cooldown').value = s.notifyCooldown;
+
+  const n = s.notifications;
+  document.getElementById('s-n-guestDown').checked = n.guestDown;
+  document.getElementById('s-n-guestRecovery').checked = n.guestRecovery;
+  document.getElementById('s-n-nodeDown').checked = n.nodeDown;
+  document.getElementById('s-n-nodeRecovery').checked = n.nodeRecovery;
+  document.getElementById('s-n-guestMemory').checked = n.guestMemory;
+  document.getElementById('s-n-guestCpu').checked = n.guestCpu;
+  document.getElementById('s-n-guestSwap').checked = n.guestSwap;
+  document.getElementById('s-n-guestDisk').checked = n.guestDisk;
+  document.getElementById('s-n-nodeMemory').checked = n.nodeMemory;
+  document.getElementById('s-n-nodeCpu').checked = n.nodeCpu;
+  document.getElementById('s-n-storage').checked = n.storage;
+  document.getElementById('s-n-zfs').checked = n.zfs;
+}
+
+function readForm() {
+  return {
+    thresholds: {
+      guestMemory: parseInt(document.getElementById('s-guestMemory').value),
+      guestCpu: parseInt(document.getElementById('s-guestCpu').value),
+      guestSwap: parseInt(document.getElementById('s-guestSwap').value),
+      guestDisk: parseInt(document.getElementById('s-guestDisk').value),
+      nodeMemory: parseInt(document.getElementById('s-nodeMemory').value),
+      nodeCpu: parseInt(document.getElementById('s-nodeCpu').value),
+      storage: parseInt(document.getElementById('s-storage').value),
+    },
+    cpuSustainMinutes: parseInt(document.getElementById('s-cpuSustain').value),
+    notifyInterval: parseInt(document.getElementById('s-interval').value),
+    notifyCooldown: parseInt(document.getElementById('s-cooldown').value),
+    notifications: {
+      guestDown: document.getElementById('s-n-guestDown').checked,
+      guestRecovery: document.getElementById('s-n-guestRecovery').checked,
+      nodeDown: document.getElementById('s-n-nodeDown').checked,
+      nodeRecovery: document.getElementById('s-n-nodeRecovery').checked,
+      guestMemory: document.getElementById('s-n-guestMemory').checked,
+      guestCpu: document.getElementById('s-n-guestCpu').checked,
+      guestSwap: document.getElementById('s-n-guestSwap').checked,
+      guestDisk: document.getElementById('s-n-guestDisk').checked,
+      nodeMemory: document.getElementById('s-n-nodeMemory').checked,
+      nodeCpu: document.getElementById('s-n-nodeCpu').checked,
+      storage: document.getElementById('s-n-storage').checked,
+      zfs: document.getElementById('s-n-zfs').checked,
+    }
+  };
+}
+
+settingsBtn.addEventListener('click', openSettings);
+settingsOverlay.addEventListener('click', closeSettings);
+settingsClose.addEventListener('click', closeSettings);
+
+settingsSave.addEventListener('click', async () => {
+  settingsSave.disabled = true;
+  settingsSave.textContent = 'Saving...';
+  try {
+    const res = await fetch('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(readForm())
+    });
+    if (res.ok) {
+      settingsStatus.textContent = 'Settings saved. Restart container for interval changes to take effect.';
+      settingsStatus.className = 'settings-status success';
+    } else {
+      const err = await res.json();
+      settingsStatus.textContent = 'Save failed: ' + err.error;
+      settingsStatus.className = 'settings-status error';
+    }
+  } catch (e) {
+    settingsStatus.textContent = 'Save failed';
+    settingsStatus.className = 'settings-status error';
+  }
+  settingsSave.disabled = false;
+  settingsSave.textContent = 'Save Settings';
+});
+
+settingsReset.addEventListener('click', () => {
+  if (currentDefaults) {
+    populateForm(currentDefaults);
+    settingsStatus.textContent = 'Reset to defaults (not saved yet)';
+    settingsStatus.className = 'settings-status success';
+  }
+});
+
 // Gotify test button
 const testNotifyBtn = document.getElementById('test-notify-btn');
 

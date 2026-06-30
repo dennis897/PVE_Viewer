@@ -5,6 +5,8 @@ services:
     restart: unless-stopped
     ports:
       - "2545:2545"
+    volumes:
+      - pve-data:/app/data
     environment:
       - PROXMOX_HOST=${PROXMOX_HOST}
       - PROXMOX_TOKEN_ID=${PROXMOX_TOKEN_ID}
@@ -17,6 +19,6 @@ services:
       - REFRESH_INTERVAL=${REFRESH_INTERVAL:-30000}
       - GOTIFY_URL=${GOTIFY_URL:-}
       - GOTIFY_TOKEN=${GOTIFY_TOKEN:-}
-      - NOTIFY_INTERVAL=${NOTIFY_INTERVAL:-60000}
-      - NOTIFY_COOLDOWN=${NOTIFY_COOLDOWN:-900000}
-      - CPU_SUSTAIN_MINUTES=${CPU_SUSTAIN_MINUTES:-60}
+
+volumes:
+  pve-data:

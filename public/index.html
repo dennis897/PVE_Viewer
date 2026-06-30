@@ -26,6 +26,7 @@
     </div>
     <div class="header-right">
       <button id="test-notify-btn" class="notify-btn hidden" title="Test Gotify notification">🔔 Test</button>
+      <button id="settings-btn" class="header-btn" title="Notification settings">⚙</button>
       <span id="status-indicator" class="status-dot"></span>
       <button id="refresh-btn" title="Refresh now">↻</button>
     </div>
@@ -33,6 +34,98 @@
 
   <div id="error-banner" class="error-banner hidden"></div>
   <div id="dashboard"></div>
+
+  <div id="settings-overlay" class="detail-overlay"></div>
+  <div id="settings-panel" class="detail-panel settings-panel">
+    <div class="detail-panel-header">
+      <h2>Notification Settings</h2>
+      <button id="settings-close" class="detail-close">✕</button>
+    </div>
+    <div class="detail-body" id="settings-body">
+      <div id="settings-no-gotify" class="settings-notice hidden">
+        Gotify is not configured. Add GOTIFY_URL and GOTIFY_TOKEN environment variables to enable notifications.
+      </div>
+      <div id="settings-form">
+        <div class="settings-section">
+          <h3>Thresholds</h3>
+          <p class="settings-hint">Alert when usage exceeds these percentages</p>
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="s-guestMemory">Guest Memory</label>
+              <div class="setting-input-row"><input type="number" id="s-guestMemory" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-guestCpu">Guest CPU</label>
+              <div class="setting-input-row"><input type="number" id="s-guestCpu" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-guestSwap">Guest Swap</label>
+              <div class="setting-input-row"><input type="number" id="s-guestSwap" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-guestDisk">Guest Disk</label>
+              <div class="setting-input-row"><input type="number" id="s-guestDisk" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-nodeMemory">Node Memory</label>
+              <div class="setting-input-row"><input type="number" id="s-nodeMemory" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-nodeCpu">Node CPU</label>
+              <div class="setting-input-row"><input type="number" id="s-nodeCpu" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-storage">Storage</label>
+              <div class="setting-input-row"><input type="number" id="s-storage" min="1" max="100"><span>%</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Timing</h3>
+          <div class="settings-grid">
+            <div class="setting-item">
+              <label for="s-cpuSustain">CPU sustained duration</label>
+              <div class="setting-input-row"><input type="number" id="s-cpuSustain" min="1" max="1440"><span>min</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-interval">Check interval</label>
+              <div class="setting-input-row"><input type="number" id="s-interval" min="10" max="3600"><span>sec</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-cooldown">Repeat cooldown</label>
+              <div class="setting-input-row"><input type="number" id="s-cooldown" min="1" max="1440"><span>min</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3>Enabled Notifications</h3>
+          <p class="settings-hint">Toggle which alerts are sent</p>
+          <div class="settings-toggles">
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestDown"><span>VM/LXC goes down</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestRecovery"><span>VM/LXC recovery</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-nodeDown"><span>Node offline</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-nodeRecovery"><span>Node recovery</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestMemory"><span>Guest memory</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestCpu"><span>Guest CPU sustained</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestSwap"><span>Guest swap</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestDisk"><span>Guest disk</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-nodeMemory"><span>Node memory</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-nodeCpu"><span>Node CPU sustained</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-storage"><span>Storage full</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-zfs"><span>ZFS pool degraded</span></label>
+          </div>
+        </div>
+
+        <div class="settings-actions">
+          <button id="settings-reset" class="settings-btn secondary">Reset to Defaults</button>
+          <button id="settings-save" class="settings-btn primary">Save Settings</button>
+        </div>
+        <div id="settings-status" class="settings-status"></div>
+      </div>
+    </div>
+  </div>
 
   <div id="detail-overlay" class="detail-overlay"></div>
   <div id="detail-panel" class="detail-panel">

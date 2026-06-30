@@ -1,23 +1,101 @@
 const fetch = require('node-fetch');
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
 
 const httpsAgent = new https.Agent({ rejectUnauthorized: false });
 
 const GOTIFY_URL = process.env.GOTIFY_URL;
 const GOTIFY_TOKEN = process.env.GOTIFY_TOKEN;
-const NOTIFY_INTERVAL = parseInt(process.env.NOTIFY_INTERVAL) || 60000;
-const NOTIFY_COOLDOWN = parseInt(process.env.NOTIFY_COOLDOWN) || 900000;
-const CPU_SUSTAIN_MINUTES = parseInt(process.env.CPU_SUSTAIN_MINUTES) || 60;
+const SETTINGS_FILE = path.join(process.env.DATA_DIR || '/app/data', 'settings.json');
 
-const THRESHOLDS = {
-  guestMemory: 0.90,
-  guestCpu: 0.90,
-  guestSwap: 0.90,
-  guestDisk: 0.95,
-  nodeMemory: 0.90,
-  nodeCpu: 0.90,
-  storage: 0.95,
+const DEFAULTS = {
+  thresholds: {
+    guestMemory: 90,
+    guestCpu: 90,
+    guestSwap: 90,
+    guestDisk: 95,
+    nodeMemory: 90,
+    nodeCpu: 90,
+    storage: 95,
+  },
+  cpuSustainMinutes: 60,
+  notifyInterval: 60,
+  notifyCooldown: 15,
+  notifications: {
+    guestDown: true,
+    guestRecovery: true,
+    nodeDown: true,
+    nodeRecovery: true,
+    guestMemory: true,
+    guestCpu: true,
+    guestSwap: true,
+    guestDisk: true,
+    nodeMemory: true,
+    nodeCpu: true,
+    storage: true,
+    zfs: true,
+  }
 };
+
+let settings = null;
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      settings = mergeDefaults(data);
+      return;
+    }
+  } catch (err) {
+    console.error('[Notifier] Error loading settings:', err.message);
+  }
+  settings = JSON.parse(JSON.stringify(DEFAULTS));
+}
+
+function mergeDefaults(saved) {
+  const merged = JSON.parse(JSON.stringify(DEFAULTS));
+  if (saved.thresholds) {
+    for (const key of Object.keys(merged.thresholds)) {
+      if (typeof saved.thresholds[key] === 'number') merged.thresholds[key] = saved.thresholds[key];
+    }
+  }
+  if (typeof saved.cpuSustainMinutes === 'number') merged.cpuSustainMinutes = saved.cpuSustainMinutes;
+  if (typeof saved.notifyInterval === 'number') merged.notifyInterval = saved.notifyInterval;
+  if (typeof saved.notifyCooldown === 'number') merged.notifyCooldown = saved.notifyCooldown;
+  if (saved.notifications) {
+    for (const key of Object.keys(merged.notifications)) {
+      if (typeof saved.notifications[key] === 'boolean') merged.notifications[key] = saved.notifications[key];
+    }
+  }
+  return merged;
+}
+
+function saveSettings(newSettings) {
+  settings = mergeDefaults(newSettings);
+  try {
+    const dir = path.dirname(SETTINGS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settings, null, 2));
+  } catch (err) {
+    console.error('[Notifier] Error saving settings:', err.message);
+    throw err;
+  }
+  return settings;
+}
+
+function getSettings() {
+  if (!settings) loadSettings();
+  return settings;
+}
+
+function threshold(key) {
+  return getSettings().thresholds[key] / 100;
+}
+
+function isEnabled(key) {
+  return getSettings().notifications[key];
+}
 
 const state = {
   guestStatus: {},
@@ -32,7 +110,7 @@ function alertKey(type, id) {
 function canNotify(key) {
   const last = state.lastNotified[key];
   if (!last) return true;
-  return Date.now() - last >= NOTIFY_COOLDOWN;
+  return Date.now() - last >= getSettings().notifyCooldown * 60000;
 }
 
 function markNotified(key) {
@@ -82,21 +160,22 @@ function trackCpu(id, cpuRatio) {
   const now = Date.now();
   if (!state.cpuHistory[id]) state.cpuHistory[id] = [];
   state.cpuHistory[id].push({ time: now, cpu: cpuRatio });
-  const cutoff = now - (CPU_SUSTAIN_MINUTES * 60 * 1000);
+  const cutoff = now - (getSettings().cpuSustainMinutes * 60 * 1000);
   state.cpuHistory[id] = state.cpuHistory[id].filter(e => e.time >= cutoff);
 }
 
-function isCpuSustained(id) {
+function isCpuSustained(id, thresholdKey) {
   const history = state.cpuHistory[id];
   if (!history || history.length < 2) return false;
-  const window = CPU_SUSTAIN_MINUTES * 60 * 1000;
+  const window = getSettings().cpuSustainMinutes * 60 * 1000;
   const span = history[history.length - 1].time - history[0].time;
   if (span < window * 0.9) return false;
-  return history.every(e => e.cpu >= THRESHOLDS.guestCpu);
+  return history.every(e => e.cpu >= threshold(thresholdKey));
 }
 
 async function checkAlerts(fetchHostData, getHosts, pveApi) {
   const alerts = [];
+  const s = getSettings();
 
   try {
     const hosts = getHosts();
@@ -107,42 +186,50 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
         const nodeId = `${hostData.host}/${node.name}`;
 
         if (node.status !== 'online') {
-          const key = alertKey('node-down', nodeId);
-          if (canNotify(key)) {
-            alerts.push({ title: 'Node Offline', message: `Node ${node.name} is ${node.status}`, priority: 8 });
-            markNotified(key);
+          if (isEnabled('nodeDown')) {
+            const key = alertKey('node-down', nodeId);
+            if (canNotify(key)) {
+              alerts.push({ title: 'Node Offline', message: `Node ${node.name} is ${node.status}`, priority: 8 });
+              markNotified(key);
+            }
           }
         } else {
-          const downKey = alertKey('node-down', nodeId);
-          if (state.lastNotified[downKey]) {
-            alerts.push({ title: 'Node Recovered', message: `Node ${node.name} is back online`, priority: 3 });
-            clearNotified(downKey);
+          if (isEnabled('nodeRecovery')) {
+            const downKey = alertKey('node-down', nodeId);
+            if (state.lastNotified[downKey]) {
+              alerts.push({ title: 'Node Recovered', message: `Node ${node.name} is back online`, priority: 3 });
+              clearNotified(downKey);
+            }
           }
         }
 
-        const nodeMemPct = pct(node.mem, node.maxmem);
-        if (nodeMemPct >= THRESHOLDS.nodeMemory) {
-          const key = alertKey('node-mem', nodeId);
-          if (canNotify(key)) {
-            alerts.push({
-              title: 'Node Memory Critical',
-              message: `${node.name}: ${fmtPct(nodeMemPct)} memory used (${fmtBytes(node.mem)} / ${fmtBytes(node.maxmem)})`,
-              priority: 7
-            });
-            markNotified(key);
+        if (isEnabled('nodeMemory')) {
+          const nodeMemPct = pct(node.mem, node.maxmem);
+          if (nodeMemPct >= threshold('nodeMemory')) {
+            const key = alertKey('node-mem', nodeId);
+            if (canNotify(key)) {
+              alerts.push({
+                title: 'Node Memory Critical',
+                message: `${node.name}: ${fmtPct(nodeMemPct)} memory used (${fmtBytes(node.mem)} / ${fmtBytes(node.maxmem)})`,
+                priority: 7
+              });
+              markNotified(key);
+            }
           }
         }
 
-        trackCpu(nodeId, node.cpu);
-        if (isCpuSustained(nodeId)) {
-          const key = alertKey('node-cpu', nodeId);
-          if (canNotify(key)) {
-            alerts.push({
-              title: 'Node CPU Sustained High',
-              message: `${node.name}: CPU above ${fmtPct(THRESHOLDS.nodeCpu)} for ${CPU_SUSTAIN_MINUTES}+ minutes (current: ${fmtPct(node.cpu)})`,
-              priority: 7
-            });
-            markNotified(key);
+        if (isEnabled('nodeCpu')) {
+          trackCpu(nodeId, node.cpu);
+          if (isCpuSustained(nodeId, 'nodeCpu')) {
+            const key = alertKey('node-cpu', nodeId);
+            if (canNotify(key)) {
+              alerts.push({
+                title: 'Node CPU Sustained High',
+                message: `${node.name}: CPU above ${s.thresholds.nodeCpu}% for ${s.cpuSustainMinutes}+ minutes (current: ${fmtPct(node.cpu)})`,
+                priority: 7
+              });
+              markNotified(key);
+            }
           }
         }
 
@@ -156,7 +243,7 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
           const label = `${guest.gtype} ${guest.vmid} (${guest.name || 'unnamed'})`;
           const prevStatus = state.guestStatus[guestId];
 
-          if (prevStatus === 'running' && guest.status !== 'running') {
+          if (isEnabled('guestDown') && prevStatus === 'running' && guest.status !== 'running') {
             const key = alertKey('guest-down', guestId);
             if (canNotify(key)) {
               alerts.push({
@@ -168,7 +255,7 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (prevStatus && prevStatus !== 'running' && guest.status === 'running') {
+          if (isEnabled('guestRecovery') && prevStatus && prevStatus !== 'running' && guest.status === 'running') {
             const downKey = alertKey('guest-down', guestId);
             if (state.lastNotified[downKey]) {
               alerts.push({
@@ -184,35 +271,39 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
 
           if (guest.status !== 'running') continue;
 
-          const memPct = pct(guest.mem, guest.maxmem);
-          if (memPct >= THRESHOLDS.guestMemory) {
-            const key = alertKey('guest-mem', guestId);
-            if (canNotify(key)) {
-              alerts.push({
-                title: `${guest.gtype} Memory Critical`,
-                message: `${label}: ${fmtPct(memPct)} memory (${fmtBytes(guest.mem)} / ${fmtBytes(guest.maxmem)})`,
-                priority: 6
-              });
-              markNotified(key);
+          if (isEnabled('guestMemory')) {
+            const memPct = pct(guest.mem, guest.maxmem);
+            if (memPct >= threshold('guestMemory')) {
+              const key = alertKey('guest-mem', guestId);
+              if (canNotify(key)) {
+                alerts.push({
+                  title: `${guest.gtype} Memory Critical`,
+                  message: `${label}: ${fmtPct(memPct)} memory (${fmtBytes(guest.mem)} / ${fmtBytes(guest.maxmem)})`,
+                  priority: 6
+                });
+                markNotified(key);
+              }
             }
           }
 
-          trackCpu(guestId, guest.cpu);
-          if (isCpuSustained(guestId)) {
-            const key = alertKey('guest-cpu', guestId);
-            if (canNotify(key)) {
-              alerts.push({
-                title: `${guest.gtype} CPU Sustained High`,
-                message: `${label}: CPU above ${fmtPct(THRESHOLDS.guestCpu)} for ${CPU_SUSTAIN_MINUTES}+ minutes (current: ${fmtPct(guest.cpu)})`,
-                priority: 6
-              });
-              markNotified(key);
+          if (isEnabled('guestCpu')) {
+            trackCpu(guestId, guest.cpu);
+            if (isCpuSustained(guestId, 'guestCpu')) {
+              const key = alertKey('guest-cpu', guestId);
+              if (canNotify(key)) {
+                alerts.push({
+                  title: `${guest.gtype} CPU Sustained High`,
+                  message: `${label}: CPU above ${s.thresholds.guestCpu}% for ${s.cpuSustainMinutes}+ minutes (current: ${fmtPct(guest.cpu)})`,
+                  priority: 6
+                });
+                markNotified(key);
+              }
             }
           }
 
-          if (guest.maxswap > 0) {
+          if (isEnabled('guestSwap') && guest.maxswap > 0) {
             const swapPct = pct(guest.swap, guest.maxswap);
-            if (swapPct >= THRESHOLDS.guestSwap) {
+            if (swapPct >= threshold('guestSwap')) {
               const key = alertKey('guest-swap', guestId);
               if (canNotify(key)) {
                 alerts.push({
@@ -225,9 +316,9 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (guest.maxdisk > 0) {
+          if (isEnabled('guestDisk') && guest.maxdisk > 0) {
             const diskPct = pct(guest.disk, guest.maxdisk);
-            if (diskPct >= THRESHOLDS.guestDisk) {
+            if (diskPct >= threshold('guestDisk')) {
               const key = alertKey('guest-disk', guestId);
               if (canNotify(key)) {
                 alerts.push({
@@ -241,41 +332,45 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
           }
         }
 
-        for (const stor of node.storages) {
-          if (!stor.active) continue;
-          const storId = `${nodeId}/${stor.storage}`;
-          const storPct = pct(stor.used, stor.total);
-          if (storPct >= THRESHOLDS.storage) {
-            const key = alertKey('storage', storId);
-            if (canNotify(key)) {
-              alerts.push({
-                title: 'Storage Critical',
-                message: `${stor.storage} on ${node.name}: ${fmtPct(storPct)} full (${fmtBytes(stor.used)} / ${fmtBytes(stor.total)})`,
-                priority: 7
-              });
-              markNotified(key);
+        if (isEnabled('storage')) {
+          for (const stor of node.storages) {
+            if (!stor.active) continue;
+            const storId = `${nodeId}/${stor.storage}`;
+            const storPct = pct(stor.used, stor.total);
+            if (storPct >= threshold('storage')) {
+              const key = alertKey('storage', storId);
+              if (canNotify(key)) {
+                alerts.push({
+                  title: 'Storage Critical',
+                  message: `${stor.storage} on ${node.name}: ${fmtPct(storPct)} full (${fmtBytes(stor.used)} / ${fmtBytes(stor.total)})`,
+                  priority: 7
+                });
+                markNotified(key);
+              }
             }
           }
         }
 
-        try {
-          const zfsPools = await pveApi(hostData.host, `/nodes/${node.name}/disks/zfs`);
-          if (Array.isArray(zfsPools)) {
-            for (const pool of zfsPools) {
-              if (pool.health && pool.health !== 'ONLINE') {
-                const key = alertKey('zfs', `${nodeId}/${pool.name}`);
-                if (canNotify(key)) {
-                  alerts.push({
-                    title: 'ZFS Pool Degraded',
-                    message: `ZFS pool ${pool.name} on ${node.name}: ${pool.health}`,
-                    priority: 8
-                  });
-                  markNotified(key);
+        if (isEnabled('zfs')) {
+          try {
+            const zfsPools = await pveApi(hostData.host, `/nodes/${node.name}/disks/zfs`);
+            if (Array.isArray(zfsPools)) {
+              for (const pool of zfsPools) {
+                if (pool.health && pool.health !== 'ONLINE') {
+                  const key = alertKey('zfs', `${nodeId}/${pool.name}`);
+                  if (canNotify(key)) {
+                    alerts.push({
+                      title: 'ZFS Pool Degraded',
+                      message: `ZFS pool ${pool.name} on ${node.name}: ${pool.health}`,
+                      priority: 8
+                    });
+                    markNotified(key);
+                  }
                 }
               }
             }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
       }
     }
   } catch (err) {
@@ -292,13 +387,16 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
 }
 
 function startNotifier(fetchHostData, getHosts, pveApi) {
+  loadSettings();
+
   if (!GOTIFY_URL || !GOTIFY_TOKEN) {
     console.log('[Notifier] Disabled — GOTIFY_URL and GOTIFY_TOKEN not set');
     return;
   }
 
-  console.log(`[Notifier] Enabled — checking every ${NOTIFY_INTERVAL / 1000}s, cooldown ${NOTIFY_COOLDOWN / 1000}s`);
-  console.log(`[Notifier] CPU sustained threshold: ${CPU_SUSTAIN_MINUTES} minutes`);
+  const s = getSettings();
+  console.log(`[Notifier] Enabled — checking every ${s.notifyInterval}s, cooldown ${s.notifyCooldown}min`);
+  console.log(`[Notifier] CPU sustained threshold: ${s.cpuSustainMinutes} minutes`);
   console.log(`[Notifier] Gotify: ${GOTIFY_URL}`);
 
   setTimeout(() => {
@@ -311,11 +409,11 @@ function startNotifier(fetchHostData, getHosts, pveApi) {
     checkAlerts(fetchHostData, getHosts, pveApi).catch(err => {
       console.error('[Notifier] Check error:', err.message);
     });
-  }, NOTIFY_INTERVAL);
+  }, s.notifyInterval * 1000);
 }
 
 function isGotifyEnabled() {
   return !!(GOTIFY_URL && GOTIFY_TOKEN);
 }
 
-module.exports = { startNotifier, sendGotify, isGotifyEnabled };
+module.exports = { startNotifier, sendGotify, isGotifyEnabled, getSettings, saveSettings, DEFAULTS };
