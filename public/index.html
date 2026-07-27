@@ -100,6 +100,16 @@
         </div>
 
         <div class="settings-section">
+          <h3>Per-VM/LXC Overrides</h3>
+          <p class="settings-hint">Set custom thresholds or mute notifications for individual guests. Anything left blank uses the global defaults above.</p>
+          <div class="override-add-row">
+            <select id="s-override-guest-picker"></select>
+            <button type="button" id="s-override-add-btn" class="settings-btn secondary">+ Add Override</button>
+          </div>
+          <div id="s-override-list" class="override-list"></div>
+        </div>
+
+        <div class="settings-section">
           <h3>Enabled Notifications</h3>
           <p class="settings-hint">Toggle which alerts are sent</p>
           <div class="settings-toggles">

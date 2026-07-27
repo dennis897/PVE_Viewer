@@ -35,8 +35,11 @@ const DEFAULTS = {
     nodeCpu: true,
     storage: true,
     zfs: true,
-  }
+  },
+  guestOverrides: {}
 };
+
+const GUEST_THRESHOLD_KEYS = ['guestMemory', 'guestCpu', 'guestSwap', 'guestDisk'];
 
 let settings = null;
 
@@ -68,6 +71,18 @@ function mergeDefaults(saved) {
       if (typeof saved.notifications[key] === 'boolean') merged.notifications[key] = saved.notifications[key];
     }
   }
+  if (saved.guestOverrides && typeof saved.guestOverrides === 'object') {
+    for (const [guestKey, override] of Object.entries(saved.guestOverrides)) {
+      if (!override || typeof override !== 'object') continue;
+      const clean = { muted: !!override.muted, label: typeof override.label === 'string' ? override.label : '', thresholds: {} };
+      if (override.thresholds && typeof override.thresholds === 'object') {
+        for (const key of GUEST_THRESHOLD_KEYS) {
+          if (typeof override.thresholds[key] === 'number') clean.thresholds[key] = override.thresholds[key];
+        }
+      }
+      merged.guestOverrides[guestKey] = clean;
+    }
+  }
   return merged;
 }
 
@@ -95,6 +110,26 @@ function threshold(key) {
 
 function isEnabled(key) {
   return getSettings().notifications[key];
+}
+
+function guestOverrideKey(host, vmid) {
+  return `${host}::${vmid}`;
+}
+
+function getGuestOverride(host, vmid) {
+  return getSettings().guestOverrides[guestOverrideKey(host, vmid)];
+}
+
+function guestThreshold(host, vmid, key) {
+  const override = getGuestOverride(host, vmid);
+  if (override && typeof override.thresholds[key] === 'number') return override.thresholds[key] / 100;
+  return threshold(key);
+}
+
+function isGuestNotifyEnabled(host, vmid, key) {
+  const override = getGuestOverride(host, vmid);
+  if (override && override.muted) return false;
+  return isEnabled(key);
 }
 
 const state = {
@@ -164,13 +199,13 @@ function trackCpu(id, cpuRatio) {
   state.cpuHistory[id] = state.cpuHistory[id].filter(e => e.time >= cutoff);
 }
 
-function isCpuSustained(id, thresholdKey) {
+function isCpuSustained(id, thresholdRatio) {
   const history = state.cpuHistory[id];
   if (!history || history.length < 2) return false;
   const window = getSettings().cpuSustainMinutes * 60 * 1000;
   const span = history[history.length - 1].time - history[0].time;
   if (span < window * 0.9) return false;
-  return history.every(e => e.cpu >= threshold(thresholdKey));
+  return history.every(e => e.cpu >= thresholdRatio);
 }
 
 async function checkAlerts(fetchHostData, getHosts, pveApi) {
@@ -220,7 +255,7 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
 
         if (isEnabled('nodeCpu')) {
           trackCpu(nodeId, node.cpu);
-          if (isCpuSustained(nodeId, 'nodeCpu')) {
+          if (isCpuSustained(nodeId, threshold('nodeCpu'))) {
             const key = alertKey('node-cpu', nodeId);
             if (canNotify(key)) {
               alerts.push({
@@ -243,7 +278,7 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
           const label = `${guest.gtype} ${guest.vmid} (${guest.name || 'unnamed'})`;
           const prevStatus = state.guestStatus[guestId];
 
-          if (isEnabled('guestDown') && prevStatus === 'running' && guest.status !== 'running') {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestDown') && prevStatus === 'running' && guest.status !== 'running') {
             const key = alertKey('guest-down', guestId);
             if (canNotify(key)) {
               alerts.push({
@@ -255,7 +290,7 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (isEnabled('guestRecovery') && prevStatus && prevStatus !== 'running' && guest.status === 'running') {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestRecovery') && prevStatus && prevStatus !== 'running' && guest.status === 'running') {
             const downKey = alertKey('guest-down', guestId);
             if (state.lastNotified[downKey]) {
               alerts.push({
@@ -271,9 +306,9 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
 
           if (guest.status !== 'running') continue;
 
-          if (isEnabled('guestMemory')) {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestMemory')) {
             const memPct = pct(guest.mem, guest.maxmem);
-            if (memPct >= threshold('guestMemory')) {
+            if (memPct >= guestThreshold(hostData.host, guest.vmid, 'guestMemory')) {
               const key = alertKey('guest-mem', guestId);
               if (canNotify(key)) {
                 alerts.push({
@@ -286,14 +321,14 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (isEnabled('guestCpu')) {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestCpu')) {
             trackCpu(guestId, guest.cpu);
-            if (isCpuSustained(guestId, 'guestCpu')) {
+            if (isCpuSustained(guestId, guestThreshold(hostData.host, guest.vmid, 'guestCpu'))) {
               const key = alertKey('guest-cpu', guestId);
               if (canNotify(key)) {
                 alerts.push({
                   title: `${guest.gtype} CPU Sustained High`,
-                  message: `${label}: CPU above ${s.thresholds.guestCpu}% for ${s.cpuSustainMinutes}+ minutes (current: ${fmtPct(guest.cpu)})`,
+                  message: `${label}: CPU above ${fmtPct(guestThreshold(hostData.host, guest.vmid, 'guestCpu'))} for ${s.cpuSustainMinutes}+ minutes (current: ${fmtPct(guest.cpu)})`,
                   priority: 6
                 });
                 markNotified(key);
@@ -301,9 +336,9 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (isEnabled('guestSwap') && guest.maxswap > 0) {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestSwap') && guest.maxswap > 0) {
             const swapPct = pct(guest.swap, guest.maxswap);
-            if (swapPct >= threshold('guestSwap')) {
+            if (swapPct >= guestThreshold(hostData.host, guest.vmid, 'guestSwap')) {
               const key = alertKey('guest-swap', guestId);
               if (canNotify(key)) {
                 alerts.push({
@@ -316,9 +351,9 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
             }
           }
 
-          if (isEnabled('guestDisk') && guest.maxdisk > 0) {
+          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestDisk') && guest.maxdisk > 0) {
             const diskPct = pct(guest.disk, guest.maxdisk);
-            if (diskPct >= threshold('guestDisk')) {
+            if (diskPct >= guestThreshold(hostData.host, guest.vmid, 'guestDisk')) {
               const key = alertKey('guest-disk', guestId);
               if (canNotify(key)) {
                 alerts.push({
@@ -416,4 +451,4 @@ function isGotifyEnabled() {
   return !!(GOTIFY_URL && GOTIFY_TOKEN);
 }
 
-module.exports = { startNotifier, sendGotify, isGotifyEnabled, getSettings, saveSettings, DEFAULTS };
+module.exports = { startNotifier, sendGotify, isGotifyEnabled, getSettings, saveSettings, DEFAULTS, guestOverrideKey };

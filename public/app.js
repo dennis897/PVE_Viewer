@@ -2,6 +2,7 @@ let refreshInterval = 30000;
 let refreshTimer = null;
 let currentNodes = [];
 let nodeDataMap = {};
+let lastData = null;
 
 async function fetchData() {
   const indicator = document.getElementById('status-indicator');
@@ -12,6 +13,7 @@ async function fetchData() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     refreshInterval = data.refreshInterval || 30000;
+    lastData = data;
     render(data);
     indicator.className = 'status-dot';
     hideError();
@@ -1142,6 +1144,121 @@ const settingsStatus = document.getElementById('settings-status');
 const settingsNoGotify = document.getElementById('settings-no-gotify');
 
 let currentDefaults = null;
+let guestOverridesState = {};
+
+const GUEST_OVERRIDE_METRICS = [
+  { key: 'guestMemory', label: 'Memory' },
+  { key: 'guestCpu', label: 'CPU' },
+  { key: 'guestSwap', label: 'Swap' },
+  { key: 'guestDisk', label: 'Disk' },
+];
+
+function guestDirectory() {
+  const guests = [];
+  if (!lastData || !lastData.hosts) return guests;
+  for (const host of lastData.hosts) {
+    for (const node of host.nodes) {
+      for (const vm of node.vms) guests.push({ host: host.host, node: node.name, type: 'VM', vmid: vm.vmid, name: vm.name });
+      for (const ct of node.lxcs) guests.push({ host: host.host, node: node.name, type: 'LXC', vmid: ct.vmid, name: ct.name });
+    }
+  }
+  return guests;
+}
+
+function guestKey(host, vmid) {
+  return `${host}::${vmid}`;
+}
+
+function guestLabel(g) {
+  return `${g.type} ${g.vmid} (${g.name || 'unnamed'}) — ${g.node}`;
+}
+
+function populateOverridePicker() {
+  const picker = document.getElementById('s-override-guest-picker');
+  const guests = guestDirectory();
+  const existing = new Set(Object.keys(guestOverridesState));
+  const available = guests.filter(g => !existing.has(guestKey(g.host, g.vmid)));
+  if (available.length === 0) {
+    picker.innerHTML = '<option value="">No more guests to add</option>';
+    picker.disabled = true;
+    return;
+  }
+  picker.disabled = false;
+  picker.innerHTML = available.map(g =>
+    `<option value="${guestKey(g.host, g.vmid)}" data-label="${guestLabel(g).replace(/"/g, '&quot;')}">${guestLabel(g)}</option>`
+  ).join('');
+}
+
+function renderOverrideList() {
+  const container = document.getElementById('s-override-list');
+  const keys = Object.keys(guestOverridesState);
+  if (keys.length === 0) {
+    container.innerHTML = '<p class="settings-hint">No per-guest overrides configured.</p>';
+    populateOverridePicker();
+    return;
+  }
+
+  container.innerHTML = keys.map(key => {
+    const o = guestOverridesState[key];
+    const metricsHtml = GUEST_OVERRIDE_METRICS.map(m => `
+      <div class="override-metric">
+        <label>${m.label}</label>
+        <input type="number" min="1" max="100" placeholder="default" data-override="${key}" data-metric="${m.key}"
+          value="${typeof o.thresholds[m.key] === 'number' ? o.thresholds[m.key] : ''}">
+      </div>
+    `).join('');
+
+    return `
+      <div class="override-row">
+        <div class="override-row-header">
+          <span class="override-guest-name">${o.label || key}</span>
+          <button type="button" class="override-remove" data-remove="${key}" title="Remove override">✕</button>
+        </div>
+        <label class="toggle-row override-mute"><input type="checkbox" data-mute="${key}" ${o.muted ? 'checked' : ''}><span>Mute all notifications for this guest</span></label>
+        <div class="override-metrics">${metricsHtml}</div>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-override]').forEach(input => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.override;
+      const metric = input.dataset.metric;
+      const val = parseInt(input.value);
+      if (!guestOverridesState[key]) return;
+      if (Number.isNaN(val)) {
+        delete guestOverridesState[key].thresholds[metric];
+      } else {
+        guestOverridesState[key].thresholds[metric] = val;
+      }
+    });
+  });
+
+  container.querySelectorAll('[data-mute]').forEach(cb => {
+    cb.addEventListener('change', () => {
+      const key = cb.dataset.mute;
+      if (guestOverridesState[key]) guestOverridesState[key].muted = cb.checked;
+    });
+  });
+
+  container.querySelectorAll('[data-remove]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      delete guestOverridesState[btn.dataset.remove];
+      renderOverrideList();
+    });
+  });
+
+  populateOverridePicker();
+}
+
+document.getElementById('s-override-add-btn').addEventListener('click', () => {
+  const picker = document.getElementById('s-override-guest-picker');
+  const key = picker.value;
+  if (!key) return;
+  const selected = picker.options[picker.selectedIndex];
+  guestOverridesState[key] = { muted: false, label: selected.dataset.label, thresholds: {} };
+  renderOverrideList();
+});
 
 function openSettings() {
   settingsPanel.classList.add('open');
@@ -1200,6 +1317,9 @@ function populateForm(s) {
   document.getElementById('s-n-nodeCpu').checked = n.nodeCpu;
   document.getElementById('s-n-storage').checked = n.storage;
   document.getElementById('s-n-zfs').checked = n.zfs;
+
+  guestOverridesState = JSON.parse(JSON.stringify(s.guestOverrides || {}));
+  renderOverrideList();
 }
 
 function readForm() {
@@ -1229,7 +1349,8 @@ function readForm() {
       nodeCpu: document.getElementById('s-n-nodeCpu').checked,
       storage: document.getElementById('s-n-storage').checked,
       zfs: document.getElementById('s-n-zfs').checked,
-    }
+    },
+    guestOverrides: guestOverridesState
   };
 }
 
