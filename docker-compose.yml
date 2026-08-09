@@ -29,6 +29,7 @@ services:
       - DOCKER_HOST_LABEL=${DOCKER_HOST_LABEL:-Docker Host}
       - DOCKER_API_URL=${DOCKER_API_URL:-}
       - DOCKER_STATS=${DOCKER_STATS:-}
+      - DOCKER_GUEST_VMID=${DOCKER_GUEST_VMID:-}
 
 volumes:
   pve-data:

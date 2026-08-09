@@ -6,7 +6,26 @@ let lastData = null;
 let dockerData = null;
 let dockerError = null;
 let dockerFetchInFlight = false;
+let dockerWasKnown = false;
 const collapsedStacks = new Set();
+// PBS and Docker start folded away so the Proxmox view stays the focus.
+// Expanding survives the auto-refresh, but not a page reload.
+const collapsedSections = new Set(['pbs', 'docker']);
+
+function sectionCollapsed(key) {
+  return collapsedSections.has(key);
+}
+
+function toggleSection(key) {
+  if (collapsedSections.has(key)) collapsedSections.delete(key);
+  else collapsedSections.add(key);
+  if (key === 'docker') renderDockerSection();
+  if (key === 'pbs' && lastData) render(lastData);
+}
+
+function collapseChevron(key) {
+  return `<span class="section-chevron">${sectionCollapsed(key) ? '▸' : '▾'}</span>`;
+}
 
 async function fetchData() {
   const indicator = document.getElementById('status-indicator');
@@ -47,6 +66,13 @@ async function fetchDockerData() {
   }
   dockerFetchInFlight = false;
   renderDockerSection();
+
+  // The guest cards carry the Docker badge, but the first Proxmox render
+  // usually beats the first Docker poll — repaint them once we know.
+  if (!!dockerData !== dockerWasKnown) {
+    dockerWasKnown = !!dockerData;
+    if (lastData) render(lastData);
+  }
 }
 
 function scheduleRefresh() {
@@ -228,6 +254,24 @@ function toggleBreakdown(metric, nodeName) {
   panel.innerHTML = html;
 }
 
+// Which Proxmox guest is the Docker host? DOCKER_GUEST_VMID pins it; failing
+// that, the daemon's own hostname is matched against the guest name.
+function isDockerHostGuest(guest) {
+  if (!dockerData) return false;
+  if (dockerData.guestVmid) return String(guest.vmid) === String(dockerData.guestVmid);
+  const hostName = dockerData.info?.name;
+  return !!hostName && !!guest.name && hostName.toLowerCase() === guest.name.toLowerCase();
+}
+
+function jumpToDocker() {
+  collapsedSections.delete('docker');
+  renderDockerSection();
+  const el = document.getElementById('docker-section');
+  if (!el) return;
+  // Offset for the sticky header, which would otherwise cover the title.
+  window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 85, behavior: 'smooth' });
+}
+
 function renderGuestCard(guest, type, nodeName) {
   const isRunning = guest.status === 'running';
   const cpuPct = isRunning ? Math.round((guest.cpu || 0) * 100) : 0;
@@ -238,6 +282,10 @@ function renderGuestCard(guest, type, nodeName) {
   const netIn = guest.netin || 0;
   const netOut = guest.netout || 0;
   const apiType = type === 'vm' ? 'qemu' : 'lxc';
+  const dt = isDockerHostGuest(guest) ? dockerData.totals : null;
+  const dockerBadge = dt
+    ? `<span class="docker-guest-badge" title="Docker host — ${dt.running} of ${dt.containers} containers running. Click to jump to the stacks." onclick="event.stopPropagation(); jumpToDocker()">🐳 ${dt.running}/${dt.containers}</span>`
+    : '';
 
   return `
     <div class="guest-card" data-node="${nodeName}" data-type="${apiType}" data-vmid="${guest.vmid}" onclick="openDetail(this)">
@@ -249,7 +297,10 @@ function renderGuestCard(guest, type, nodeName) {
             <span class="vmid">${type.toUpperCase()} ${guest.vmid}</span>
           </div>
         </div>
-        <span class="guest-status ${guest.status}">${guest.status}</span>
+        <div class="guest-badges">
+          ${dockerBadge}
+          <span class="guest-status ${guest.status}">${guest.status}</span>
+        </div>
       </div>
       ${isRunning ? `
         <div class="guest-metrics">
@@ -530,8 +581,6 @@ function render(data) {
   const hasPbs = !!data.pbs;
 
   if (hasPbs) {
-    html += `<div class="dashboard-columns">`;
-    html += `<div class="dashboard-col pve-col">${pveHtml}</div>`;
     const allPveGuests = [];
     for (const host of data.hosts) {
       for (const node of host.nodes) {
@@ -539,8 +588,18 @@ function render(data) {
         for (const ct of node.lxcs) allPveGuests.push({ id: String(ct.vmid), type: 'ct', name: ct.name, status: ct.status });
       }
     }
-    html += `<div class="dashboard-col pbs-col">${renderPbsSection(data.pbs, allPveGuests)}</div>`;
-    html += `</div>`;
+    const pbsHtml = renderPbsSection(data.pbs, allPveGuests);
+
+    if (sectionCollapsed('pbs')) {
+      // Collapsed to a single header bar, so the side-by-side split would
+      // just leave a tall empty column — give the width back to Proxmox.
+      html = pveHtml + pbsHtml;
+    } else {
+      html += `<div class="dashboard-columns">`;
+      html += `<div class="dashboard-col pve-col">${pveHtml}</div>`;
+      html += `<div class="dashboard-col pbs-col">${pbsHtml}</div>`;
+      html += `</div>`;
+    }
   } else {
     html = pveHtml;
   }
@@ -646,14 +705,22 @@ function renderDockerSection() {
   const cpuBar = hostCores ? Math.min(100, Math.round(t.cpu / hostCores)) : 0;
   const memPct = pct(t.mem, d.info?.memTotal);
 
+  const collapsed = sectionCollapsed('docker');
   let html = `<div class="node-section docker-host-section">`;
 
-  html += `<div class="node-header">
+  html += `<div class="node-header collapsible" onclick="toggleSection('docker')">
+    ${collapseChevron('docker')}
     <h2><span class="docker-icon">🐳</span> ${esc(d.label)}</h2>
     <span class="node-status-badge ${t.unhealthy > 0 || t.stopped > 0 ? 'degraded' : 'online'}">${t.running}/${t.containers} up</span>
     ${d.version ? `<span class="uptime">Docker ${esc(d.version.version)}</span>` : ''}
+    ${collapsed ? `<span class="uptime">${d.stacks.filter(s => s.managed).length} stacks</span>` : ''}
     ${d.info?.name ? `<span class="host-label">${esc(d.info.name)}</span>` : ''}
   </div>`;
+
+  if (collapsed) {
+    container.innerHTML = `${html}</div>`;
+    return;
+  }
 
   html += `<div class="overview-grid">
     <div class="overview-card">
@@ -807,9 +874,11 @@ function backupAgeClass(epochSecs) {
 
 // PBS Section
 function renderPbsSection(pbs, pveGuests) {
-  let html = `<div class="node-section pbs-section">`;
+  const collapsed = sectionCollapsed('pbs');
+  let html = `<div class="node-section pbs-section${collapsed ? ' collapsed' : ''}">`;
 
-  html += `<div class="node-header">
+  html += `<div class="node-header collapsible" onclick="toggleSection('pbs')">
+    ${collapseChevron('pbs')}
     <h2>
       <span class="pbs-icon">🛡</span>
       Proxmox Backup Server
@@ -819,6 +888,20 @@ function renderPbsSection(pbs, pveGuests) {
   if (pbs.nodeStatus) {
     html += `<span class="uptime">Uptime: ${formatUptime(pbs.nodeStatus.uptime)}</span>`;
   }
+
+  if (collapsed) {
+    // Keep the numbers that would make you want to open it visible.
+    const totalSnaps = pbs.datastores.reduce((sum, d) => sum + d.totalSnapshots, 0);
+    const failed = pbs.recentTasks.filter(t => t.status && t.status !== 'OK').length;
+    const stale = pbs.datastores
+      .flatMap(d => d.guestBackups)
+      .filter(g => backupAgeClass(g.lastBackup) === 'backup-stale' || backupAgeClass(g.lastBackup) === 'backup-old').length;
+    html += `<span class="uptime">${totalSnaps} snapshots</span>`;
+    if (failed > 0) html += `<span class="collapsed-warn">${failed} failed</span>`;
+    if (stale > 0) html += `<span class="collapsed-warn">${stale} stale</span>`;
+    return `${html}</div></div>`;
+  }
+
   html += `</div>`;
 
   if (pbs.nodeStatus) {

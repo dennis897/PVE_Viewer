@@ -1662,3 +1662,71 @@ header {
   color: var(--text-dim);
   text-transform: uppercase;
 }
+
+/* Collapsible section headers (PBS, Docker) */
+.node-header.collapsible {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 8px;
+  padding: 6px 8px;
+  margin-left: -8px;
+  transition: background 0.15s;
+  /* Collapsed headers carry summary chips, which need somewhere to go on
+     narrow screens rather than running off the edge. */
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.node-header.collapsible:hover {
+  background: var(--surface);
+}
+
+.section-chevron {
+  color: var(--text-dim);
+  font-size: 13px;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.collapsed-warn {
+  font-size: 13px;
+  color: var(--yellow);
+  background: rgba(251, 191, 36, 0.12);
+  padding: 2px 8px;
+  border-radius: 8px;
+}
+
+/* PBS collapsed to a single bar reclaims the full dashboard width */
+.pbs-section.collapsed {
+  border-left: none;
+  padding-left: 0;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+  margin-top: 8px;
+}
+
+/* Docker host marker on the owning VM/LXC card */
+.guest-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.docker-guest-badge {
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 9px;
+  border-radius: 10px;
+  background: rgba(45, 124, 246, 0.16);
+  color: var(--accent);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.docker-guest-badge:hover {
+  background: rgba(45, 124, 246, 0.28);
+  border-color: var(--accent);
+}

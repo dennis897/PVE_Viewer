@@ -16,6 +16,7 @@ const SOCKET_PATH = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
 const API_URL = process.env.DOCKER_API_URL || '';
 const HOST_LABEL = process.env.DOCKER_HOST_LABEL || 'Docker Host';
 const STATS_ENABLED = process.env.DOCKER_STATS !== 'false';
+const GUEST_VMID = process.env.DOCKER_GUEST_VMID || null;
 
 function detectEnabled() {
   if (process.env.DOCKER_ENABLED === 'false') return false;
@@ -237,6 +238,10 @@ async function fetchDockerData() {
   return {
     label: HOST_LABEL,
     source: API_URL || SOCKET_PATH,
+    // Lets the dashboard mark which Proxmox guest is this Docker host. The
+    // daemon's hostname usually matches the guest name; DOCKER_GUEST_VMID
+    // pins it explicitly when it doesn't.
+    guestVmid: GUEST_VMID,
     version: version ? { version: version.Version, apiVersion: version.ApiVersion } : null,
     info: info ? {
       name: info.Name,
