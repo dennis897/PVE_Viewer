@@ -5,6 +5,7 @@ const https = require('https');
 const path = require('path');
 
 const { startNotifier, sendGotify, isGotifyEnabled, getSettings, saveSettings, DEFAULTS } = require('./notifier');
+const { dockerEnabled, dockerSource, fetchDockerData, fetchContainerDetail } = require('./docker');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -337,6 +338,37 @@ app.get('/api/storage/:node/:storage', async (req, res) => {
   }
 });
 
+app.get('/api/docker', async (req, res) => {
+  if (!dockerEnabled) {
+    return res.json({ enabled: false });
+  }
+  try {
+    const data = await fetchDockerData();
+    res.json({ enabled: true, ...data, timestamp: new Date().toISOString() });
+  } catch (err) {
+    console.error('Docker fetch error:', err.message);
+    res.status(500).json({ enabled: true, error: err.message });
+  }
+});
+
+app.get('/api/docker/container/:id', async (req, res) => {
+  if (!dockerEnabled) {
+    return res.status(404).json({ error: 'Docker integration disabled' });
+  }
+  // Container IDs and names only — keeps the id from being used to reach
+  // other parts of the Docker API.
+  if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(req.params.id)) {
+    return res.status(400).json({ error: 'Invalid container id' });
+  }
+  try {
+    const data = await fetchContainerDetail(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('Docker detail error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use(express.json());
 
 app.get('/api/notifier/status', (req, res) => {
@@ -372,6 +404,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`Proxmox View running at http://localhost:${PORT}`);
   console.log(`Monitoring: ${getHosts().join(', ')}`);
   if (pbsEnabled) console.log(`PBS: ${PBS_HOST}`);
+  console.log(`Docker: ${dockerEnabled ? dockerSource : 'disabled (no socket)'}`);
   console.log(`Refresh interval: ${REFRESH_INTERVAL}ms`);
   startNotifier(fetchHostData, getHosts, pveApi);
 });

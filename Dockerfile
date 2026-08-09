@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --production
 
-COPY server.js notifier.js ./
+COPY server.js notifier.js docker.js ./
 COPY public/ ./public/
 
 EXPOSE 2545

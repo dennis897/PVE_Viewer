@@ -1403,6 +1403,10 @@ header {
     padding: 12px;
   }
 
+  #docker-section {
+    padding: 0 12px 12px;
+  }
+
   .overview-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1415,8 +1419,13 @@ header {
     grid-template-columns: 1fr;
   }
 
+  .docker-grid {
+    grid-template-columns: 1fr;
+  }
+
   .guest-card,
   .storage-card,
+  .docker-card,
   .overview-card {
     padding: 14px;
   }
@@ -1458,4 +1467,198 @@ header {
   .overview-card .value {
     font-size: 24px;
   }
+}
+
+/* Docker section — lives outside #dashboard so it survives a failed
+   Proxmox poll, hence it repeats the container's own layout rules. */
+#docker-section {
+  padding: 0 24px 24px;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
+#docker-section:empty {
+  padding: 0;
+}
+
+.docker-host-section {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.docker-icon {
+  margin-right: 6px;
+}
+
+.node-status-badge.degraded {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--yellow);
+}
+
+.docker-stack-title {
+  cursor: pointer;
+  user-select: none;
+}
+
+.docker-stack-title:hover {
+  color: var(--text);
+}
+
+.docker-stack-title .stack-toggle {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.section-title .count.warn {
+  background: rgba(251, 191, 36, 0.2);
+  color: var(--yellow);
+}
+
+.docker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(320px, 100%), 1fr));
+  gap: 14px;
+}
+
+.docker-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.docker-card:hover {
+  border-color: var(--accent);
+}
+
+.docker-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.docker-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.docker-name strong {
+  font-size: 15px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.docker-service {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.docker-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.docker-health {
+  font-size: 12px;
+}
+
+.docker-health.healthy {
+  color: var(--green);
+}
+
+.docker-health.unhealthy {
+  color: var(--red);
+}
+
+.docker-health.starting {
+  color: var(--yellow);
+}
+
+.docker-image {
+  font-size: 12px;
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-bottom: 4px;
+}
+
+.docker-status {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+}
+
+.docker-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.docker-net {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 8px;
+}
+
+.docker-ports {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.docker-port {
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--border);
+  color: var(--text-dim);
+}
+
+.docker-port.published {
+  background: rgba(45, 124, 246, 0.18);
+  color: var(--accent);
+}
+
+.docker-noports {
+  font-size: 11px;
+  color: var(--text-dim);
+  font-style: italic;
+}
+
+.docker-logs {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  max-height: 340px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.docker-logs.short {
+  max-height: 120px;
+}
+
+.mount-mode {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-transform: uppercase;
 }

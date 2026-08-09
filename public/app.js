@@ -3,6 +3,10 @@ let refreshTimer = null;
 let currentNodes = [];
 let nodeDataMap = {};
 let lastData = null;
+let dockerData = null;
+let dockerError = null;
+let dockerFetchInFlight = false;
+const collapsedStacks = new Set();
 
 async function fetchData() {
   const indicator = document.getElementById('status-indicator');
@@ -22,7 +26,27 @@ async function fetchData() {
     showError(`Connection failed: ${err.message}`);
   }
 
+  // Docker lives on a separate poll: sampling per-container stats takes a
+  // second or two and shouldn't hold up the Proxmox refresh.
+  fetchDockerData();
+
   scheduleRefresh();
+}
+
+async function fetchDockerData() {
+  if (dockerFetchInFlight) return;
+  dockerFetchInFlight = true;
+  try {
+    const res = await fetch('/api/docker');
+    const data = await res.json();
+    dockerData = data && data.enabled ? data : null;
+    dockerError = data && data.error ? data.error : null;
+  } catch (err) {
+    dockerData = null;
+    dockerError = err.message;
+  }
+  dockerFetchInFlight = false;
+  renderDockerSection();
 }
 
 function scheduleRefresh() {
@@ -526,6 +550,250 @@ function render(data) {
   }
 
   dashboard.innerHTML = html;
+}
+
+// Docker section
+function esc(str) {
+  return String(str == null ? '' : str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function dockerStateClass(state) {
+  if (state === 'running') return 'running';
+  if (state === 'restarting' || state === 'paused') return 'paused';
+  return 'stopped';
+}
+
+function renderPortList(ports) {
+  if (!ports || ports.length === 0) return '<span class="docker-noports">no published ports</span>';
+  return ports.map(p => p.host
+    ? `<span class="docker-port published">${p.host}→${p.container}</span>`
+    : `<span class="docker-port">${p.container}/${esc(p.type)}</span>`
+  ).join('');
+}
+
+function renderDockerCard(c, hostCores) {
+  const isRunning = c.state === 'running';
+  const cpuRaw = c.cpu || 0;
+  const cpuBar = hostCores ? Math.min(100, Math.round(cpuRaw / hostCores)) : Math.min(100, Math.round(cpuRaw));
+  const memPct = pct(c.mem, c.memLimit);
+  const healthBadge = c.health
+    ? `<span class="docker-health ${c.health}" title="Healthcheck: ${c.health}">${c.health === 'healthy' ? '●' : c.health === 'unhealthy' ? '▲' : '◌'}</span>`
+    : '';
+
+  return `
+    <div class="docker-card" data-id="${esc(c.id)}" data-name="${esc(c.name)}" onclick="openDockerDetail(this)">
+      <div class="docker-card-header">
+        <div class="docker-name">
+          <strong>${esc(c.name)}</strong>
+          ${c.service && c.service !== c.name ? `<span class="docker-service">${esc(c.service)}</span>` : ''}
+        </div>
+        <div class="docker-badges">
+          ${healthBadge}
+          <span class="guest-status ${dockerStateClass(c.state)}">${esc(c.state)}</span>
+        </div>
+      </div>
+      <div class="docker-image" title="${esc(c.image)}">${esc(c.image)}</div>
+      <div class="docker-status">${esc(c.status)}</div>
+      ${isRunning && c.cpu !== null ? `
+        <div class="docker-metrics">
+          <div class="metric">
+            <div class="metric-header">
+              <span class="metric-label">CPU</span>
+              <span class="metric-value">${cpuRaw.toFixed(1)}%</span>
+            </div>
+            ${progressBar(cpuBar)}
+          </div>
+          <div class="metric">
+            <div class="metric-header">
+              <span class="metric-label">Memory</span>
+              <span class="metric-value">${formatBytes(c.mem)}</span>
+            </div>
+            ${progressBar(memPct)}
+          </div>
+        </div>
+        <div class="docker-net">↓${formatBytes(c.netIn)} ↑${formatBytes(c.netOut)}</div>
+      ` : ''}
+      <div class="docker-ports">${renderPortList(c.ports)}</div>
+    </div>
+  `;
+}
+
+function renderDockerSection() {
+  const container = document.getElementById('docker-section');
+  if (!container) return;
+
+  if (dockerError) {
+    container.innerHTML = `<div class="node-section docker-host-section">
+      <div class="node-header"><h2><span class="docker-icon">🐳</span> Docker</h2>
+      <span class="node-status-badge offline">error</span></div>
+      <div class="empty-state"><p>${esc(dockerError)}</p></div>
+    </div>`;
+    return;
+  }
+
+  if (!dockerData) {
+    container.innerHTML = '';
+    return;
+  }
+
+  const d = dockerData;
+  const hostCores = d.info?.cpus || 0;
+  const t = d.totals;
+  const cpuBar = hostCores ? Math.min(100, Math.round(t.cpu / hostCores)) : 0;
+  const memPct = pct(t.mem, d.info?.memTotal);
+
+  let html = `<div class="node-section docker-host-section">`;
+
+  html += `<div class="node-header">
+    <h2><span class="docker-icon">🐳</span> ${esc(d.label)}</h2>
+    <span class="node-status-badge ${t.unhealthy > 0 || t.stopped > 0 ? 'degraded' : 'online'}">${t.running}/${t.containers} up</span>
+    ${d.version ? `<span class="uptime">Docker ${esc(d.version.version)}</span>` : ''}
+    ${d.info?.name ? `<span class="host-label">${esc(d.info.name)}</span>` : ''}
+  </div>`;
+
+  html += `<div class="overview-grid">
+    <div class="overview-card">
+      <div class="label">Containers</div>
+      <div class="value">${t.running} <span style="font-size:14px;color:var(--text-dim)">/ ${t.containers}</span></div>
+      <div class="sub">${t.stopped} stopped${t.unhealthy > 0 ? `, <span style="color:var(--red)">${t.unhealthy} unhealthy</span>` : ''}</div>
+    </div>
+    <div class="overview-card">
+      <div class="label">CPU (containers)</div>
+      <div class="value">${t.cpu.toFixed(1)}%</div>
+      <div class="sub">of ${hostCores || '—'} cores</div>
+      ${progressBar(cpuBar)}
+    </div>
+    <div class="overview-card">
+      <div class="label">Memory (containers)</div>
+      <div class="value">${memPct}%</div>
+      <div class="sub">${formatBytes(t.mem)}${d.info?.memTotal ? ` / ${formatBytes(d.info.memTotal)}` : ''}</div>
+      ${progressBar(memPct)}
+    </div>
+    <div class="overview-card">
+      <div class="label">Stacks</div>
+      <div class="value">${d.stacks.filter(s => s.managed).length}</div>
+      <div class="sub">${d.info?.images || 0} images</div>
+    </div>
+  </div>`;
+
+  for (const stack of d.stacks) {
+    const collapsed = collapsedStacks.has(stack.name);
+    const allUp = stack.running === stack.containers.length;
+    html += `<div class="section-title docker-stack-title" onclick="toggleDockerStack('${esc(stack.name)}')">
+      <span class="stack-toggle">${collapsed ? '▸' : '▾'}</span>
+      ${stack.managed ? esc(stack.name) : 'Standalone containers'}
+      <span class="count ${allUp ? '' : 'warn'}">${stack.running}/${stack.containers.length}</span>
+    </div>`;
+    html += `<div class="docker-grid" ${collapsed ? 'style="display:none"' : ''}>`;
+    for (const c of stack.containers) {
+      html += renderDockerCard(c, hostCores);
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  container.innerHTML = html;
+}
+
+function toggleDockerStack(name) {
+  if (collapsedStacks.has(name)) collapsedStacks.delete(name);
+  else collapsedStacks.add(name);
+  renderDockerSection();
+}
+
+function openDockerDetail(el) {
+  const id = el.dataset.id;
+  const name = el.dataset.name;
+
+  document.getElementById('detail-title').textContent = `${name} (container)`;
+  document.getElementById('detail-body').innerHTML = '<div class="detail-loading">Loading...</div>';
+  document.getElementById('detail-overlay').classList.add('open');
+  document.getElementById('detail-panel').classList.add('open');
+
+  fetch(`/api/docker/container/${encodeURIComponent(id)}`)
+    .then(r => r.json())
+    .then(data => {
+      if (data.error) throw new Error(data.error);
+      renderDockerDetail(data);
+    })
+    .catch(err => {
+      document.getElementById('detail-body').innerHTML = `<div class="detail-loading">Error: ${esc(err.message)}</div>`;
+    });
+}
+
+function renderDockerDetail(c) {
+  const body = document.getElementById('detail-body');
+  const started = c.startedAt && !c.startedAt.startsWith('0001') ? new Date(c.startedAt) : null;
+  const uptime = started && c.state === 'running'
+    ? formatUptime(Math.floor((Date.now() - started.getTime()) / 1000))
+    : '—';
+
+  let html = `<div class="detail-section">
+    <h3>Container</h3>
+    <div class="detail-grid">
+      ${detailItem('Status', `<span class="guest-status ${dockerStateClass(c.state)}">${esc(c.state)}</span>`)}
+      ${detailItem('Uptime', uptime)}
+      ${detailItem('Stack', c.stack ? esc(c.stack) : 'standalone')}
+      ${detailItem('Service', c.service ? esc(c.service) : '—')}
+      ${detailItem('Container ID', esc(c.id))}
+      ${detailItem('Restart policy', esc(c.restartPolicy))}
+      ${detailItem('Restarts', c.restartCount)}
+      ${c.state !== 'running' ? detailItem('Exit code', c.exitCode) : ''}
+      ${detailItem('Image', esc(c.image), true)}
+      ${detailItem('Command', esc(c.command) || '—', true)}
+      ${c.memLimit ? detailItem('Memory limit', formatBytes(c.memLimit)) : ''}
+      ${c.cpuLimit ? detailItem('CPU limit', `${c.cpuLimit} cores`) : ''}
+      ${c.error ? detailItem('Error', esc(c.error), true) : ''}
+    </div>
+  </div>`;
+
+  if (c.health) {
+    html += `<div class="detail-section">
+      <h3>Healthcheck</h3>
+      <div class="detail-grid">
+        ${detailItem('Status', `<span class="docker-health ${esc(c.health.status)}">${esc(c.health.status)}</span>`)}
+        ${detailItem('Failing streak', c.health.failingStreak)}
+      </div>
+      ${c.health.lastLog ? `<pre class="docker-logs short">${esc(c.health.lastLog)}</pre>` : ''}
+    </div>`;
+  }
+
+  if (c.portBindings.length > 0) {
+    html += `<div class="detail-section"><h3>Ports</h3><div class="detail-grid">`;
+    for (const p of c.portBindings) {
+      html += detailItem(esc(p.container), p.host ? `host ${esc(p.host)}` : 'not published');
+    }
+    html += `</div></div>`;
+  }
+
+  if (c.networks.length > 0) {
+    html += `<div class="detail-section"><h3>Networks</h3><div class="detail-grid">`;
+    for (const n of c.networks) {
+      html += detailItem(esc(n.name), n.ip ? esc(n.ip) : '—');
+    }
+    html += `</div></div>`;
+  }
+
+  if (c.mounts.length > 0) {
+    html += `<div class="detail-section"><h3>Mounts</h3><div class="detail-grid">`;
+    for (const m of c.mounts) {
+      html += detailItem(esc(m.destination), `${esc(m.source)} <span class="mount-mode">${esc(m.mode)}</span>`, true);
+    }
+    html += `</div></div>`;
+  }
+
+  html += `<div class="detail-section">
+    <h3>Recent Logs</h3>
+    <pre class="docker-logs">${esc(c.logs) || 'No log output.'}</pre>
+  </div>`;
+
+  body.innerHTML = html;
+  const pre = body.querySelector('.docker-logs:not(.short)');
+  if (pre) pre.scrollTop = pre.scrollHeight;
 }
 
 function backupAgeClass(epochSecs) {

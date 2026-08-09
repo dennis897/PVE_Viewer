@@ -7,6 +7,12 @@ services:
       - "2545:2545"
     volumes:
       - pve-data:/app/data
+      # Docker panel: read the local daemon (VM 102) directly.
+      # Comment this out — or set DOCKER_ENABLED=false — to hide the panel.
+      # Note: socket access is root-equivalent on the host; the app only
+      # issues read calls, but set DOCKER_API_URL to a socket-proxy instead
+      # if you want that enforced outside this container.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
       - PROXMOX_HOST=${PROXMOX_HOST}
       - PROXMOX_TOKEN_ID=${PROXMOX_TOKEN_ID}
@@ -19,6 +25,10 @@ services:
       - REFRESH_INTERVAL=${REFRESH_INTERVAL:-30000}
       - GOTIFY_URL=${GOTIFY_URL:-}
       - GOTIFY_TOKEN=${GOTIFY_TOKEN:-}
+      - DOCKER_ENABLED=${DOCKER_ENABLED:-}
+      - DOCKER_HOST_LABEL=${DOCKER_HOST_LABEL:-Docker Host}
+      - DOCKER_API_URL=${DOCKER_API_URL:-}
+      - DOCKER_STATS=${DOCKER_STATS:-}
 
 volumes:
   pve-data:
