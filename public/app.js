@@ -1502,6 +1502,8 @@ const GUEST_OVERRIDE_METRICS = [
   { key: 'guestCpu', label: 'CPU' },
   { key: 'guestSwap', label: 'Swap' },
   { key: 'guestDisk', label: 'Disk' },
+  { key: 'guestPressure', label: 'LXC Pressure %' },
+  { key: 'guestSwapIn', label: 'VM Swap-in MB/min', max: 10000 },
 ];
 
 function guestDirectory() {
@@ -1554,7 +1556,7 @@ function renderOverrideList() {
     const metricsHtml = GUEST_OVERRIDE_METRICS.map(m => `
       <div class="override-metric">
         <label>${m.label}</label>
-        <input type="number" min="1" max="100" placeholder="default" data-override="${key}" data-metric="${m.key}"
+        <input type="number" min="1" max="${m.max || 100}" placeholder="default" data-override="${key}" data-metric="${m.key}"
           value="${typeof o.thresholds[m.key] === 'number' ? o.thresholds[m.key] : ''}">
       </div>
     `).join('');
@@ -1647,11 +1649,14 @@ function populateForm(s) {
   document.getElementById('s-guestCpu').value = thresholds.guestCpu;
   document.getElementById('s-guestSwap').value = thresholds.guestSwap;
   document.getElementById('s-guestDisk').value = thresholds.guestDisk;
+  document.getElementById('s-guestPressure').value = thresholds.guestPressure;
+  document.getElementById('s-guestSwapIn').value = thresholds.guestSwapIn;
   document.getElementById('s-nodeMemory').value = thresholds.nodeMemory;
   document.getElementById('s-nodeCpu').value = thresholds.nodeCpu;
   document.getElementById('s-storage').value = thresholds.storage;
 
   document.getElementById('s-cpuSustain').value = s.cpuSustainMinutes;
+  document.getElementById('s-memSustain').value = s.memorySustainMinutes;
   document.getElementById('s-interval').value = s.notifyInterval;
   document.getElementById('s-cooldown').value = s.notifyCooldown;
 
@@ -1664,6 +1669,8 @@ function populateForm(s) {
   document.getElementById('s-n-guestCpu').checked = n.guestCpu;
   document.getElementById('s-n-guestSwap').checked = n.guestSwap;
   document.getElementById('s-n-guestDisk').checked = n.guestDisk;
+  document.getElementById('s-n-guestPressure').checked = n.guestPressure;
+  document.getElementById('s-n-guestSwapIn').checked = n.guestSwapIn;
   document.getElementById('s-n-nodeMemory').checked = n.nodeMemory;
   document.getElementById('s-n-nodeCpu').checked = n.nodeCpu;
   document.getElementById('s-n-storage').checked = n.storage;
@@ -1680,11 +1687,14 @@ function readForm() {
       guestCpu: parseInt(document.getElementById('s-guestCpu').value),
       guestSwap: parseInt(document.getElementById('s-guestSwap').value),
       guestDisk: parseInt(document.getElementById('s-guestDisk').value),
+      guestPressure: parseInt(document.getElementById('s-guestPressure').value),
+      guestSwapIn: parseInt(document.getElementById('s-guestSwapIn').value),
       nodeMemory: parseInt(document.getElementById('s-nodeMemory').value),
       nodeCpu: parseInt(document.getElementById('s-nodeCpu').value),
       storage: parseInt(document.getElementById('s-storage').value),
     },
     cpuSustainMinutes: parseInt(document.getElementById('s-cpuSustain').value),
+    memorySustainMinutes: parseInt(document.getElementById('s-memSustain').value),
     notifyInterval: parseInt(document.getElementById('s-interval').value),
     notifyCooldown: parseInt(document.getElementById('s-cooldown').value),
     notifications: {
@@ -1696,6 +1706,8 @@ function readForm() {
       guestCpu: document.getElementById('s-n-guestCpu').checked,
       guestSwap: document.getElementById('s-n-guestSwap').checked,
       guestDisk: document.getElementById('s-n-guestDisk').checked,
+      guestPressure: document.getElementById('s-n-guestPressure').checked,
+      guestSwapIn: document.getElementById('s-n-guestSwapIn').checked,
       nodeMemory: document.getElementById('s-n-nodeMemory').checked,
       nodeCpu: document.getElementById('s-n-nodeCpu').checked,
       storage: document.getElementById('s-n-storage').checked,

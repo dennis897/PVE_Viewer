@@ -49,10 +49,10 @@
       <div id="settings-form">
         <div class="settings-section">
           <h3>Thresholds</h3>
-          <p class="settings-hint">Alert when usage exceeds these percentages</p>
+          <p class="settings-hint">Alert when usage exceeds these limits. Guest memory is judged by pressure: LXCs by memory stall time, VMs by sustained swap-in. The Guest Memory % only applies to guests with neither signal.</p>
           <div class="settings-grid">
             <div class="setting-item">
-              <label for="s-guestMemory">Guest Memory</label>
+              <label for="s-guestMemory">Guest Memory (fallback)</label>
               <div class="setting-input-row"><input type="number" id="s-guestMemory" min="1" max="100"><span>%</span></div>
             </div>
             <div class="setting-item">
@@ -66,6 +66,14 @@
             <div class="setting-item">
               <label for="s-guestDisk">Guest Disk</label>
               <div class="setting-input-row"><input type="number" id="s-guestDisk" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-guestPressure">LXC Memory Pressure</label>
+              <div class="setting-input-row"><input type="number" id="s-guestPressure" min="1" max="100"><span>%</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-guestSwapIn">VM Swap-in Rate</label>
+              <div class="setting-input-row"><input type="number" id="s-guestSwapIn" min="1" max="10000"><span>MB/min</span></div>
             </div>
             <div class="setting-item">
               <label for="s-nodeMemory">Node Memory</label>
@@ -88,6 +96,10 @@
             <div class="setting-item">
               <label for="s-cpuSustain">CPU sustained duration</label>
               <div class="setting-input-row"><input type="number" id="s-cpuSustain" min="1" max="1440"><span>min</span></div>
+            </div>
+            <div class="setting-item">
+              <label for="s-memSustain">Memory pressure duration</label>
+              <div class="setting-input-row"><input type="number" id="s-memSustain" min="1" max="1440"><span>min</span></div>
             </div>
             <div class="setting-item">
               <label for="s-interval">Check interval</label>
@@ -118,7 +130,9 @@
             <label class="toggle-row"><input type="checkbox" id="s-n-guestRecovery"><span>VM/LXC recovery</span></label>
             <label class="toggle-row"><input type="checkbox" id="s-n-nodeDown"><span>Node offline</span></label>
             <label class="toggle-row"><input type="checkbox" id="s-n-nodeRecovery"><span>Node recovery</span></label>
-            <label class="toggle-row"><input type="checkbox" id="s-n-guestMemory"><span>Guest memory</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestMemory"><span>Guest memory % (fallback)</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestPressure"><span>LXC memory pressure</span></label>
+            <label class="toggle-row"><input type="checkbox" id="s-n-guestSwapIn"><span>VM swap-in</span></label>
             <label class="toggle-row"><input type="checkbox" id="s-n-guestCpu"><span>Guest CPU sustained</span></label>
             <label class="toggle-row"><input type="checkbox" id="s-n-guestSwap"><span>Guest swap</span></label>
             <label class="toggle-row"><input type="checkbox" id="s-n-guestDisk"><span>Guest disk</span></label>

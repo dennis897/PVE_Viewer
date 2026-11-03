@@ -15,11 +15,14 @@ const DEFAULTS = {
     guestCpu: 90,
     guestSwap: 90,
     guestDisk: 95,
+    guestPressure: 10,
+    guestSwapIn: 10,
     nodeMemory: 90,
     nodeCpu: 90,
     storage: 95,
   },
   cpuSustainMinutes: 60,
+  memorySustainMinutes: 10,
   notifyInterval: 60,
   notifyCooldown: 15,
   notifications: {
@@ -31,6 +34,8 @@ const DEFAULTS = {
     guestCpu: true,
     guestSwap: true,
     guestDisk: true,
+    guestPressure: true,
+    guestSwapIn: true,
     nodeMemory: true,
     nodeCpu: true,
     storage: true,
@@ -39,7 +44,7 @@ const DEFAULTS = {
   guestOverrides: {}
 };
 
-const GUEST_THRESHOLD_KEYS = ['guestMemory', 'guestCpu', 'guestSwap', 'guestDisk'];
+const GUEST_THRESHOLD_KEYS = ['guestMemory', 'guestCpu', 'guestSwap', 'guestDisk', 'guestPressure', 'guestSwapIn'];
 
 let settings = null;
 
@@ -64,6 +69,7 @@ function mergeDefaults(saved) {
     }
   }
   if (typeof saved.cpuSustainMinutes === 'number') merged.cpuSustainMinutes = saved.cpuSustainMinutes;
+  if (typeof saved.memorySustainMinutes === 'number') merged.memorySustainMinutes = saved.memorySustainMinutes;
   if (typeof saved.notifyInterval === 'number') merged.notifyInterval = saved.notifyInterval;
   if (typeof saved.notifyCooldown === 'number') merged.notifyCooldown = saved.notifyCooldown;
   if (saved.notifications) {
@@ -126,6 +132,13 @@ function guestThreshold(host, vmid, key) {
   return threshold(key);
 }
 
+// Raw value (no /100) for thresholds that aren't percentages, e.g. guestSwapIn in MB/min.
+function guestThresholdRaw(host, vmid, key) {
+  const override = getGuestOverride(host, vmid);
+  if (override && typeof override.thresholds[key] === 'number') return override.thresholds[key];
+  return getSettings().thresholds[key];
+}
+
 function isGuestNotifyEnabled(host, vmid, key) {
   const override = getGuestOverride(host, vmid);
   if (override && override.muted) return false;
@@ -135,6 +148,8 @@ function isGuestNotifyEnabled(host, vmid, key) {
 const state = {
   guestStatus: {},
   cpuHistory: {},
+  pressureHistory: {},
+  swapInHistory: {},
   lastNotified: {},
 };
 
@@ -206,6 +221,56 @@ function isCpuSustained(id, thresholdRatio) {
   const span = history[history.length - 1].time - history[0].time;
   if (span < window * 0.9) return false;
   return history.every(e => e.cpu >= thresholdRatio);
+}
+
+// Memory pressure tracking. Proxmox's guest "mem" counts page cache as used,
+// so a percentage threshold fires on healthy guests. Instead:
+//  - LXC: pressurememorysome is the container cgroup's PSI (avg10 %), i.e. real
+//    stall time inside the guest.
+//  - VM: pressurememorysome is the QEMU process on the *host*, so it says nothing
+//    about the guest. Use the balloon driver's cumulative swap-in counter; a
+//    sustained swap-in rate means the guest is short on RAM.
+function memoryWindowMs() {
+  return getSettings().memorySustainMinutes * 60 * 1000;
+}
+
+function trackPressure(id, value) {
+  const now = Date.now();
+  if (!state.pressureHistory[id]) state.pressureHistory[id] = [];
+  state.pressureHistory[id].push({ time: now, value });
+  const cutoff = now - memoryWindowMs();
+  state.pressureHistory[id] = state.pressureHistory[id].filter(e => e.time >= cutoff);
+}
+
+function isPressureSustained(id, thresholdPct) {
+  const history = state.pressureHistory[id];
+  if (!history || history.length < 2) return false;
+  const span = history[history.length - 1].time - history[0].time;
+  if (span < memoryWindowMs() * 0.9) return false;
+  return history.every(e => e.value >= thresholdPct);
+}
+
+function trackSwapIn(id, bytes) {
+  const now = Date.now();
+  let history = state.swapInHistory[id] || [];
+  // Counter went backwards: guest rebooted, start over.
+  if (history.length && bytes < history[history.length - 1].bytes) history = [];
+  history.push({ time: now, bytes });
+  // Keep one sample older than the window so the rate covers the full window.
+  const cutoff = now - memoryWindowMs();
+  while (history.length > 2 && history[1].time <= cutoff) history.shift();
+  state.swapInHistory[id] = history;
+}
+
+// Average swap-in rate in MB/min over the sustain window, or null until the window is filled.
+function swapInRate(id) {
+  const history = state.swapInHistory[id];
+  if (!history || history.length < 2) return null;
+  const first = history[0];
+  const last = history[history.length - 1];
+  const span = last.time - first.time;
+  if (span < memoryWindowMs() * 0.9) return null;
+  return (last.bytes - first.bytes) / 1048576 / (span / 60000);
 }
 
 async function checkAlerts(fetchHostData, getHosts, pveApi) {
@@ -306,7 +371,47 @@ async function checkAlerts(fetchHostData, getHosts, pveApi) {
 
           if (guest.status !== 'running') continue;
 
-          if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestMemory')) {
+          const lxcPsi = guest.gtype === 'LXC' && guest.pressurememorysome !== undefined
+            ? parseFloat(guest.pressurememorysome) : NaN;
+          const vmSwapIn = guest.gtype === 'VM' && guest.ballooninfo
+            ? guest.ballooninfo.mem_swapped_in : undefined;
+
+          if (!Number.isNaN(lxcPsi)) {
+            if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestPressure')) {
+              const limit = guestThresholdRaw(hostData.host, guest.vmid, 'guestPressure');
+              trackPressure(guestId, lxcPsi);
+              if (isPressureSustained(guestId, limit)) {
+                const key = alertKey('guest-pressure', guestId);
+                if (canNotify(key)) {
+                  alerts.push({
+                    title: `${guest.gtype} Memory Pressure`,
+                    message: `${label}: memory stalls above ${limit}% for ${s.memorySustainMinutes}+ minutes (current: ${lxcPsi.toFixed(1)}%, ${fmtBytes(guest.mem)} / ${fmtBytes(guest.maxmem)})`,
+                    priority: 6
+                  });
+                  markNotified(key);
+                }
+              }
+            }
+          } else if (typeof vmSwapIn === 'number') {
+            if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestSwapIn')) {
+              const limit = guestThresholdRaw(hostData.host, guest.vmid, 'guestSwapIn');
+              trackSwapIn(guestId, vmSwapIn);
+              const rate = swapInRate(guestId);
+              if (rate !== null && rate >= limit) {
+                const key = alertKey('guest-swapin', guestId);
+                if (canNotify(key)) {
+                  const free = guest.ballooninfo.free_mem;
+                  alerts.push({
+                    title: `${guest.gtype} Memory Pressure`,
+                    message: `${label}: swapping in ${rate.toFixed(1)} MB/min over the last ${s.memorySustainMinutes} minutes (limit ${limit} MB/min, guest free ${typeof free === 'number' ? fmtBytes(free) : 'n/a'})`,
+                    priority: 6
+                  });
+                  markNotified(key);
+                }
+              }
+            }
+          } else if (isGuestNotifyEnabled(hostData.host, guest.vmid, 'guestMemory')) {
+            // Fallback for guests with no pressure signal (VM without balloon stats).
             const memPct = pct(guest.mem, guest.maxmem);
             if (memPct >= guestThreshold(hostData.host, guest.vmid, 'guestMemory')) {
               const key = alertKey('guest-mem', guestId);
@@ -432,6 +537,7 @@ function startNotifier(fetchHostData, getHosts, pveApi) {
   const s = getSettings();
   console.log(`[Notifier] Enabled — checking every ${s.notifyInterval}s, cooldown ${s.notifyCooldown}min`);
   console.log(`[Notifier] CPU sustained threshold: ${s.cpuSustainMinutes} minutes`);
+  console.log(`[Notifier] Memory pressure window: ${s.memorySustainMinutes} minutes (LXC PSI >= ${s.thresholds.guestPressure}%, VM swap-in >= ${s.thresholds.guestSwapIn} MB/min)`);
   console.log(`[Notifier] Gotify: ${GOTIFY_URL}`);
 
   setTimeout(() => {
